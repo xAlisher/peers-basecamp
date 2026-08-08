@@ -1,0 +1,33 @@
+# Build output
+build/
+result
+result-*
+dist/
+*.lgx
+
+# Nix
+.direnv/
+
+# Identity / secrets — NEVER commit (public repo)
+*.peersenc
+*.key
+*.pem
+keystore*
+secrets/
+fixtures/private/
+**/identity.json
+user-dir/
+.instance/
+
+# Editor / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Logs
+logs/
+*.log
+
+# Scratch screenshots that aren't curated evidence
+docs/screenshots/tmp/
