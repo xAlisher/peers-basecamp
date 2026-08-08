@@ -16,12 +16,6 @@ logos_module(
         src/PeersUiBackend.cpp
         src/ContentMarkers.h
         src/ContentMarkers.cpp
-        src/BackupReader.h
-        src/BackupReader.cpp
-        src/Identicon.h
-        src/Identicon.cpp
-        src/PinLock.h
-        src/PinLock.cpp
     INCLUDE_DIRS
         src
 )

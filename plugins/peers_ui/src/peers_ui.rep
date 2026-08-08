@@ -14,7 +14,7 @@
 // the Peers feature set. Everything beyond plain text rides the content-marker
 // codec (ADR 0002) — the core carries only `content: tstr`.
 
-class PeersUi
+class PeersUiBackend
 {
     ENUM ChatStatus {
         Stopped      = 0,
