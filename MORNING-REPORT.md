@@ -111,7 +111,7 @@ Two smaller notes:
 
 ## Recommended order for the next session
 
-1. Work `HALT.md` — it is mechanical and unblocks all seven UI epics.
+1. Work `HALT.md` / [#57](https://github.com/xAlisher/peers-basecamp/issues/57) — it is mechanical and unblocks all seven UI epics.
 2. Screenshot-verify the shell against the Peers reference; close E7.
 3. Marker **encode** + reply/reaction/pin, which are pure additions to a codec that already decodes.
 4. Stand up the two-instance harness as a script (with join retry) and start filling

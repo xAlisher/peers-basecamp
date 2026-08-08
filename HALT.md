@@ -1,5 +1,7 @@
 # HALT — `peers_ui` view fails to load; `capability_module` SIGSEGVs
 
+> Tracked as [#57](https://github.com/xAlisher/peers-basecamp/issues/57).
+
 **Date:** 2026-08-09 · **Blocks:** every UI epic (E1–E7) · **Does not block:** the pure-logic work
 
 This is the one hard blocker from the overnight run. Everything else that could proceed did —
