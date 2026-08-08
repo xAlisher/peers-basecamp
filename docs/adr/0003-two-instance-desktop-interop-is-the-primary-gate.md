@@ -1,6 +1,6 @@
 # ADR 0003 — Two local instances are the primary interop gate
 
-- **Status:** Accepted
+- **Status:** Accepted — **and empirically verified, 2026-08-09** (see Verification below)
 - **Date:** 2026-08-09
 - **Amends:** the build plan's Phase 0 step 3
 
@@ -51,3 +51,38 @@ whole build depend on the least certain link.
 - If the empirical check in step 2 *fails* and the two instances really do collide, this ADR is
   superseded and the phone becomes the primary gate as the plan originally specified. The check is
   therefore run early, and its result is recorded either way.
+
+## Verification (2026-08-09)
+
+Step 2 was run, twice, using upstream's own `chat-ui-exchange` harness offscreen on `wild`.
+
+**Result: the decision holds.** Two instances coexisted and completed a real bidirectional,
+end-to-end-encrypted round-trip over the live `logos.test` fleet:
+
+```
+both Online
+alice: read her address...            alice address: 64 chars
+bob: open a conversation with alice's address...
+bob: send the first message...        bob: first message sent
+alice: received Bob's message
+alice: reply...
+bob: wait for the reply...            bob: received the reply
+```
+
+Screenshot evidence is committed at `docs/screenshots/interop-desktop/` — five captures showing
+Alice's account card Online, Bob's sent message, Alice receiving it, Alice replying, and Bob's
+completed thread ("Hi Alice, it's Bob 👋" / "Hi Bob, got it").
+
+- **The plan's port-60000 claim is disproven** for `delivery_module` v0.2.0. `ss -tln` showed no
+  fixed-port contention, and both delivery nodes ran simultaneously with distinct libp2p peer IDs.
+- **Two findings worth carrying forward:**
+  1. **The first run failed** — `FAILED: timed out waiting for alice joins conversation`. Both
+     instances were Online and Bob's `create_conversation` succeeded, but the MLS invite did not
+     reach Alice inside the harness timeout. The second run, unchanged, passed end to end. So the
+     join step is **flaky against the live fleet**, not broken. Our own harness must therefore
+     retry rather than treat a single timeout as a failure, and must distinguish "invite did not
+     land yet" from "our code is wrong" — otherwise a green suite will randomly go red and teach
+     everyone to ignore it.
+  2. The offscreen captures confirm the `MultiEffect` problem in ADR 0005 first-hand: upstream's
+     New-chat button, copy button and send arrow all render as bare backgrounds with no icon.
+     Our vector-path icons exist specifically so our screenshot loop does not inherit this.

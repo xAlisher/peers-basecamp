@@ -1,6 +1,8 @@
 # Peers (logos-chat-android) — Complete Feature + Screen Inventory
 
-Ground truth extracted by reading source at `<logos-chat-android>`.
+Ground truth extracted by reading source at `<logos-chat-android>`
+(verified against commit `a4c20c9`; a second adversarial pass re-checked every citation
+and quoted string against the files, so line numbers are good to ±2 unless noted).
 Every value below is cited as `path:line`. Paths are repo-relative.
 Anything I could not find in source is called out explicitly as **NOT IN SOURCE**.
 
@@ -347,7 +349,7 @@ Sections in render order (`:198-389`):
 - `Remove PIN` row (only when a PIN exists) → mode `removeMain` (`:318-327`).
 - Two helper paragraphs, quoted verbatim at `:329-338` — including the honest scope statement that the PIN is a screen lock, not disk encryption.
 - `Lock when app goes to background` toggle (default `false`), sublabel `'Ask for the PIN again when you return after a short while.'` (`:342-350`).
-- `Set wipe PIN` / `Change wipe PIN` (duress) + `Remove wipe PIN`, with the explanation at `:369-373`.
+- `Set wipe PIN` / `Change wipe PIN` (duress) → `PinFlowModal` mode `setDuress` (`:353`); `Remove wipe PIN` bypasses the modal and calls `securityStore.removeDuressPin()`, toasting `'Wipe PIN removed'` (`:362`, `:179-182`); explanation copy at `:369-373`. Both this and the lock-on-background toggle above render only when a main PIN exists — one `{hasPin && …}` wraps them (`:340`).
 - Danger zone card (`colors.errorBorder` border): `Reset identity and data` in `colors.unread` (`:377-384`) + helper (`:385-388`).
 - Reset confirm `Modal`: title `'Reset identity and data?'`, body at `:409-413`, `Cancel` / `Reset` (`Reset` styled `backgroundColor: colors.unread`), `Resetting…` spinner state (`:401-437`).
 
@@ -440,7 +442,7 @@ All per-message actions live behind a long-press on the bubble (`ChatScreen.tsx:
 
 **Pin (E2).** Prefix `PIN_PREFIX = 'pin1:'` (`src/messages/pins.ts:11`); `encodePin(op, key)` (`:20`); `foldPins` — newest wins, `'-'` clears (`:43`). v1: only the group creator may pin/unpin (`ChatScreen.tsx:2537-2544`, unpin also in the pin bar `:1960-1971`).
 
-**Forward (E1).** `ForwardPicker` modal lists all conversations (`src/components/ForwardPicker.tsx:1-2`, `:22`). `chatStore.forwardMessage(content, toConvoPk)` re-uploads images/voice via `LogosChat.sendImageTo` / `sendVoiceTo` after `ImagePicker.readFileBase64`, and re-sends text/location through the normal send path; refuses media into a mesh chat (`chatStore.ts:1355-1382`). Toast `'Forwarded'` (`ChatScreen.tsx:2619`). Forwarding an `addr1:` card additionally navigates into the target chat (`:2620-2631`).
+**Forward (E1).** `ForwardPicker` modal lists all conversations (`src/components/ForwardPicker.tsx:1-2`, `:22`). `chatStore.forwardMessage(content, toConvoPk)` re-uploads images/voice via `LogosChat.sendImageTo` / `sendVoiceTo` after `ImagePicker.readFileBase64`, and re-sends text/location through the normal send path; refuses media into a mesh chat (`chatStore.ts:1351-1382`). Toast `'Forwarded'` (`ChatScreen.tsx:2619`). Forwarding an `addr1:` card additionally navigates into the target chat (`:2620-2631`).
 
 **Delete (E1).** `chatStore.deleteMessage(convoPk, msgPk)` → `LogosChat.deleteMessage(msgPk)` (`chatStore.ts:1798`) — local only, no remote unsend.
 
@@ -506,6 +508,46 @@ PIN app-lock, duress/wipe PIN, lock screen, lock-on-background, reset identity a
 ### 4.8 Identity export / restore — **E6**
 See §3.12. Note `MyAddressScreen.tsx:82-88` documents that a true QR **image** share needed a native method — the text/URI share was the fallback until `shareIdentityImage` landed (`LogosChat.ts:291-295`).
 
+### 4.9 Shared components the screens above assume exist (`src/components/`, in-scope only)
+
+The screen sections cite these by name; a port needs the same set of primitives or the
+per-screen descriptions don't compose. Line counts are the Android source's, as a rough
+size signal. (Mesh/BLE/Tor components are listed in §6 instead.)
+
+| Component | Lines | What it is |
+|---|---|---|
+| `SideMenu.tsx` | 566 | The drawer — see §3.13 |
+| `OverflowMenu.tsx` | 445 | THE popup-menu primitive: rows ≥44dp, panel fill, border, dim backdrop; `anchor="point"` + `anchorY` for long-press menus, or anchored under a header ellipsis. Also exports the menu icon set (`EllipsisIcon`, `TagIcon`, `PencilIcon`, `UserPlusIcon`, `UsersIcon`, `LogOutIcon`, `EraserIcon`, `TrashIcon`, `CopyIcon`, `PinIcon`, `ReplyIcon`, `ClipboardIcon`, `MessageCircleIcon`, `BackIcon`, `MeshIcon`, `:32-282`) and `MenuItem = {key, label, icon, onPress, destructive?, testID?}` (`:284-292`) |
+| `MediaViewer.tsx` | 415 | Full-screen media viewer — see §4.2 |
+| `SpeedDialFab.tsx` | 347 | FAB + expanding labelled mini-actions + backdrop; `FabAction = {key, label, testID, icon, onPress?, disabled?}` (`:116-123`) — `onPress` is optional so a "coming soon" row can be inert |
+| `BubbleActionMenu.tsx` | 293 | Per-message long-press menu — see §4.1 |
+| `AddressModal.tsx` | 263 | "Show address" for a peer: label title, badged QR, full hex, Copy, Forward |
+| `HexAvatar.tsx` | 231 | Identicon / custom avatar — see §2 |
+| `PinFlowModal.tsx` | 215 | The Settings PIN flows over `PinPad`. `PinFlowMode = 'setMain' \| 'setDuress' \| 'removeMain'` (`:15`) — `setMain` is new→confirm, or old→new→confirm when a PIN exists; `removeMain` verifies then clears. There is **no** `removeDuress` mode: removing the wipe PIN calls `securityStore.removeDuressPin()` directly (`SettingsScreen.tsx:143`, `:179-182`) |
+| `LabelModal.tsx` | 178 | Set the local private label (+ verified) for a contact — one decision, one button |
+| `QrCard.tsx` | 171 | Pure-JS `qrcode-generator` matrix → one `react-native-svg` path, always `qrBg`/`qrFg`, ~260dp with quiet zone, centred identicon (or avatar image) badge |
+| `BackupPassphraseModal.tsx` | 156 | Passphrase twice + the plain-language "what's included / no recovery" copy, before export |
+| `VoiceBubble.tsx` | 144 | Play/stop + recorded waveform + `mm:ss`, playback via the native audio module |
+| `InfoModal.tsx` | 120 | Generic (i) explainer: title + sections + "Got it" (restart-group #191, invited-wait #192) |
+| `PinPad.tsx` | 112 | 6 dots + an **own** numeric keypad (no soft keyboard — deterministic lock screen) |
+| `SwipeRow.tsx` | 111 | Swipe-left-to-delete: red ribbon, haptic at the arm threshold, "release to delete", gesture-committed, no dialog; RN `PanResponder` (no gesture-handler) |
+| `StorageInfoModal.tsx` | 106 | The (i) behind the per-group storage toggle |
+| `StatusPill.tsx` | 102 | Node status pill: stopped → amber pulse (0.35↔1.0, 550 ms) → running → error; dot **and** label, never colour-only |
+| `MediaSendBubble.tsx` | 101 | Video "sending" bubble: poster + circular progress ring + `compressing`/`sending` phase |
+| `ForwardPicker.tsx` | 87 | Modal conversation picker (forward, share-a-contact, send-my-address) |
+| `AddressCard.tsx` | 86 | In-thread `addr1:` card: identicon + shared name + short hex + Add/View |
+| `EmojiGridModal.tsx` | 83 | Dependency-free curated emoji grid behind the quick-react `+` |
+| `MediaVideo.tsx` | 77 | Native video surface: inline muted/looping preview, or fullscreen with controls/seek |
+| `KeyboardAwareScreen.tsx` | 72 | The wrapper every input screen uses so a bottom field + its CTA clear the keyboard |
+| `ErrorToast.tsx` | 70 | Bottom toast, `errorFill`/`errorBorder`, **persistent** with a manual ✕ (no auto-dismiss) |
+| `SystemLine.tsx` | 62 | Centred non-message note inside a thread ("… joined", "Group ended …") |
+| `ActionButton.tsx` | 62 | The one primary/secondary button pair (same height + font everywhere) |
+| `VerifiedBadge.tsx` | 45 | Blue scalloped seal + white check; local, user-asserted, never broadcast |
+| `SwipeBackGesture.tsx` | 43 | App-level edge-swipe-back (Android native-stack has none) |
+| `PulseDot.tsx` | 43 | Pulsing status dot (same 0.35↔1.0 / 550 ms motion as `StatusPill`) |
+| `NodeStatusIcon.tsx` | 43 | The chat logo tinted by node status |
+| plus | — | `UnreadBadge` (red fill, white count, capped `99+`), `Logo`, `LockIcon`, `SendIcon`, `MediaIcons`/`MediaViewerIcons`, `QrIcon` |
+
 ---
 
 ## 5. Suggested epic assignment (roll-up)
@@ -545,8 +587,8 @@ See §3.12. Note `MyAddressScreen.tsx:82-88` documents that a true QR **image** 
 Drop all of the following from the desktop port.
 
 **Whole screens**
-- `src/screens/MeshCoreScreen.tsx` (508 lines) — pair/connect a MeshCore LoRa radio over BLE, self-info, broadcast label, channels/DMs (`:1-4`). Contains `PUBLIC_CHANNEL_KEY = '8b3387e9c5cdea6ac9e5edbaa115cd72'` (`:35`).
-- `src/screens/MeshConfigScreen.tsx` (392 lines) — radio params, region presets `EU 868 / US 915 / AU-NZ 915 …` (`:24-28`).
+- `src/screens/MeshCoreScreen.tsx` (508 lines) — pair/connect a MeshCore LoRa radio over BLE, self-info, broadcast label, channels/DMs (`:1-4`). Contains `PUBLIC_CHANNEL_KEY = '8b3387e9c5cdea6ac9e5edbaa115cd72'` (`:36`).
+- `src/screens/MeshConfigScreen.tsx` (392 lines) — radio params, region presets `EU 868 / US 915 / AU/NZ 915 …` (`PRESETS`, `:26-30`).
 - `src/screens/NearbyScreen.tsx` (350 lines) — BLE-mesh nearby peers, hop pages, all/contacts/verified filters (`:1-4`).
 Routes to delete: `MeshCore`, `MeshConfig`, `Nearby` (`RootNavigator.tsx:240-254`; types `navigation/types.ts:30-35`).
 
@@ -579,7 +621,7 @@ Routes to delete: `MeshCore`, `MeshConfig`, `Nearby` (`RootNavigator.tsx:240-254
 | `radioRefusesGroupSetup` LoRa refusal on New Group / Add Members | `NewGroupScreen.tsx:45-50`, `AddMembersScreen.tsx:166-175` |
 | Settings **Privacy → Route media over Tor** (already dead code: `TOR_TOGGLE_READY = false`) + `TorBootstrapModal` | `SettingsScreen.tsx:62-65`, `:111-135`, `:291-308`, `:393-398` |
 | App boot `restoreBleEngaged()` + BLE-engage pref persistence | `App.tsx:50-72`, `:128-137`, `:153` |
-| `HexAvatar` `mesh` / `ble` ramps and `AvatarKind` values | `HexAvatar.tsx:29-38` |
+| `HexAvatar` `mesh` / `ble` ramps, the `AvatarKind` union, its `RAMPS`/`PREFIX` entries, and the `'mesh'`/`'ble'` branches of `convoKind()` | `HexAvatar.tsx:27-30`, `:32-41`, `:224-229` |
 | About blurb naming MeshCore / Bluetooth mesh | `AboutScreen.tsx:149-154` |
 | Conversation `transport` field branching (`'logos' \| 'mesh' \| 'ble'`) | `ConversationsScreen.tsx:235-246`, `ChatScreen.tsx:899-900` |
 | `chatStore` mesh actions: `openMeshChannel`, `startMeshDm`, `switchGroupToMesh`, `switchGroupToLogos`, `mapMeshIdentity`, `unmapMeshIdentity`, `setContactMeshMap`, `clearContactMeshMap` | `chatStore.ts:208-221`, `:361-363` |
@@ -602,4 +644,9 @@ Routes to delete: `MeshCore`, `MeshConfig`, `Nearby` (`RootNavigator.tsx:240-254
 9. **No onboarding/welcome screen.** `initialRouteName` is `Conversations` (`RootNavigator.tsx:154`); the node auto-starts (`App.tsx:150`).
 10. Voice-note cap `MAX_RECORDING_MS = 120_000` ms (`src/native/Audio.ts:11`) — rendered in the timer as `/ 2:00` (`ChatScreen.tsx:2255-2257`). Album pick cap `MAX_ALBUM = 10` (`src/stores/chatStore.ts:118`), matching the composer's `MAX_STAGED_IMAGES = 10` (`ChatScreen.tsx:169`).
 11. `formatLastSeen(lastInboundAt, now)` (`src/stores/conversationView.ts:319-331`) returns `''` for `<=0`, then `'last seen just now'` (<60 s) → `'last seen Nm ago'` → `'last seen Nh ago'` → `'last seen Nd ago'` (<7 d) → `'last seen Nw ago'` (<5 w) → `'last seen a while ago'`.
-12. `deriveComposerState` (`src/stores/groupState.ts`) is the pure, unit-tested source of `running/connecting/overMesh/meshLive/dead/canRevive/canSendBase/sendColorKind` (`ChatScreen.tsx:1320-1330`); the port should re-implement it 1:1 minus the mesh/BLE branches. I did not read its body.
+12. `deriveComposerState` (`src/stores/groupState.ts:50-91`) is the pure, unit-tested source of `running/connecting/overMesh/meshLive/canSendBase/sendColorKind/logosDead/dead/canRevive`, consumed at `ChatScreen.tsx:1320-1330`. Body, with the mesh/BLE terms struck out for the port:
+    - `running = nodeStatus === 'running'` (`:51`); `connecting = nodeStatus === 'initializing' || 'starting'` (`:52-53`).
+    - `canSendBase = meshLive || running || bleReachable` (`:57`) → **`= running`** for the port.
+    - `sendColorKind = bleReachable ? 'ble' : meshLive ? 'mesh' : running ? 'accent' : connecting ? 'connecting' : 'offline'` (`:63-71`) → **`running ? 'accent' : connecting ? 'connecting' : 'offline'`**, mapped to colours at `ChatScreen.tsx:1339-1348`.
+    - `logosDead = isGroup && !isMesh && liveness === 'dead'`; `dead = logosDead && !meshLive` → **`dead = logosDead`**; `canRevive = logosDead && createdByMe` (`:75-78`).
+    A pure MeshCore channel is never "dead" because it has no MLS side — irrelevant once mesh is dropped, but it explains the `!isMesh` term.
