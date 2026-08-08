@@ -1,0 +1,174 @@
+// Qt Remote Objects contract for the Peers backend.
+//
+// PROPs auto-sync to QML (backend.myAddress); SIGNALs arrive via
+// Connections{target: backend}; SLOTs are called directly from QML, wrapped in
+// logos.watch(...).
+//
+// List data crosses as JSON strings rather than QtRO-remoted QAbstractItemModels
+// (ADR 0006). Upstream logos-chat-ui uses remoted models and documents the cost:
+// the replicas don't proxy Q_INVOKABLE lookups, so it has to mirror per-row
+// derived values back out as separate scalar PROPs. JSON keeps one source of
+// truth per list and matches the proven receiver-basecamp shape.
+//
+// Contract shape follows upstream logos-chat-ui 0.2.2 (ADR 0001), extended for
+// the Peers feature set. Everything beyond plain text rides the content-marker
+// codec (ADR 0002) — the core carries only `content: tstr`.
+
+class PeersUi
+{
+    ENUM ChatStatus {
+        Stopped      = 0,
+        Initialising = 1,
+        Online       = 2,
+        Error        = 3
+    }
+
+    // ── connection / identity ────────────────────────────────────────────────
+    PROP(ChatStatus chatStatus READONLY)
+    // Human-readable detail behind chatStatus, from delivery_state_changed.
+    PROP(QString statusDetail="" READONLY)
+    // This installation's own address — the string a peer needs to reach it.
+    PROP(QString myAddress="" READONLY)
+    // Short display form of myAddress, on the same rule as a roster row's label.
+    PROP(QString myLabel="" READONLY)
+    // This account's display name (local; broadcast to peers via the pfp1:
+    // marker alongside the avatar).
+    PROP(QString myDisplayName="" READONLY)
+    // Own avatar: either "" (render the HexAvatar identicon from myAddress) or a
+    // data: URI for a custom avatar the user set.
+    PROP(QString myAvatar="" READONLY)
+
+    // ── list data (ADR 0006: JSON, not remoted models) ───────────────────────
+    // JSON array of conversations, newest activity first. Row shape in
+    // docs/VIEW-MODEL.md.
+    PROP(QString conversationsJson="[]" READONLY)
+    // JSON array of the loaded conversation's messages, oldest first.
+    PROP(QString messagesJson="[]" READONLY)
+    // JSON array of the loaded conversation's roster: committed members first,
+    // then invites awaiting the group's commit.
+    PROP(QString membersJson="[]" READONLY)
+
+    // ── selection ────────────────────────────────────────────────────────────
+    PROP(QString currentConversationId)
+    // The conversation whose messages and roster the models actually hold.
+    // Empty while a selection is loading, so the view can tell a loaded thread
+    // from the rows of the conversation left behind.
+    PROP(QString loadedConversationId="" READONLY)
+    PROP(bool    currentIsGroup=false READONLY)
+    PROP(QString currentDisplayName="" READONLY)
+    PROP(QString currentDescription="" READONLY)
+    // The other participant's address in the current direct conversation; empty
+    // for a group or while the roster is unknown.
+    PROP(QString currentPeerAddress="" READONLY)
+    // Committed member count. Pending invites are listed in memberModel but not
+    // counted here.
+    PROP(int     memberCount=0 READONLY)
+    PROP(int     pendingMemberCount=0 READONLY)
+    // The pinned message of the current conversation, as JSON ({} = none).
+    PROP(QString currentPinnedJson="{}" READONLY)
+
+    // ── composer state ───────────────────────────────────────────────────────
+    // Draft text for the current conversation, restored on reselect.
+    PROP(QString currentDraft="" READONLY)
+    // True while a voice note is recording; elapsed ms for the 2:00 cap timer.
+    PROP(bool    recording=false READONLY)
+    PROP(int     recordingMs=0 READONLY)
+
+    // ── security ─────────────────────────────────────────────────────────────
+    // Whether a PIN app-lock is configured, and whether the app is locked now.
+    PROP(bool    pinSet=false READONLY)
+    PROP(bool    locked=false READONLY)
+    // Seconds the user must wait before another PIN attempt (rate limiting).
+    PROP(int     lockoutSeconds=0 READONLY)
+
+    // ── settings ─────────────────────────────────────────────────────────────
+    // All app settings as a JSON object, so adding a setting doesn't churn the
+    // contract. Keys documented in docs/SETTINGS.md.
+    PROP(QString settingsJson="{}" READONLY)
+
+    // ── contacts ─────────────────────────────────────────────────────────────
+    // JSON array of known contacts (address, label, verified, avatar, lastSeen).
+    PROP(QString contactsJson="[]" READONLY)
+
+    // ── diagnostics ──────────────────────────────────────────────────────────
+    // Every failure this run reported, newest first: {when, message, count}.
+    PROP(QVariantList errors READONLY)
+    PROP(QString logDir="" READONLY)
+
+    // ── signals ──────────────────────────────────────────────────────────────
+    // A message the module refused, so the composer can offer the text back.
+    SIGNAL(sendFailed(QString conversationId, QString content))
+    SIGNAL(error(QString message))
+    // Slot returns cannot cross QtRO to QML, so results that QML must react to
+    // arrive as signals instead.
+    SIGNAL(backupOpened(QString address, int conversationCount, int messageCount))
+    SIGNAL(backupFailed(QString reason))
+    SIGNAL(qrDecoded(QString text))
+    SIGNAL(identityReset())
+    // A conversation the user should be taken to (e.g. after starting one from a
+    // shared contact card).
+    SIGNAL(navigateToConversation(QString conversationId))
+
+    // ── conversations & messages ─────────────────────────────────────────────
+    SLOT(void selectConversation(QString conversationId))
+    SLOT(void createConversation(QString peerAddress))
+    SLOT(void sendMessage(QString conversationId, QString content))
+    SLOT(void retryMessage(QString conversationId, QString localId))
+    SLOT(void deleteConversation(QString conversationId))
+    SLOT(void setConversationNickname(QString conversationId, QString nickname))
+    SLOT(void setDraft(QString conversationId, QString text))
+
+    // Message interactions. All encode through the content-marker codec.
+    SLOT(void sendReply(QString conversationId, QString content, QString replyToId))
+    SLOT(void forwardMessage(QString fromConversationId, QString messageId, QString toConversationId))
+    SLOT(void reactToMessage(QString conversationId, QString messageId, QString emoji))
+    SLOT(void unreactToMessage(QString conversationId, QString messageId, QString emoji))
+    SLOT(void pinMessage(QString conversationId, QString messageId))
+    SLOT(void unpinMessage(QString conversationId))
+    SLOT(void deleteMessageForMe(QString conversationId, QString messageId))
+    SLOT(void copyToClipboard(QString text))
+
+    // ── media ────────────────────────────────────────────────────────────────
+    // localPath is a plain filesystem path, never a file:// URL.
+    SLOT(void sendMedia(QString conversationId, QString localPath, QString kind))
+    SLOT(void saveMedia(QString messageId, QString destPath))
+    SLOT(void startRecording())
+    SLOT(void cancelRecording())
+    SLOT(void sendRecording(QString conversationId))
+
+    // ── groups ───────────────────────────────────────────────────────────────
+    SLOT(void createGroupConversation(QString name, QString description))
+    SLOT(void addGroupMember(QString conversationId, QString peerAddress))
+    SLOT(void refreshMembers())
+    SLOT(void leaveGroup(QString conversationId))
+
+    // ── contacts & identity ──────────────────────────────────────────────────
+    SLOT(void refreshContacts())
+    SLOT(void setContactLabel(QString address, QString label))
+    SLOT(void removeContact(QString address))
+    SLOT(void sendContactCard(QString conversationId, QString address))
+    SLOT(void setDisplayName(QString name))
+    // localPath "" clears the custom avatar (broadcasts the pfp1:clear marker).
+    SLOT(void setAvatar(QString localPath))
+    // Decode a QR from an image file or a captured frame.
+    SLOT(void decodeQrFromFile(QString localPath))
+
+    // ── settings ─────────────────────────────────────────────────────────────
+    SLOT(void setSetting(QString key, QString jsonValue))
+
+    // ── security ─────────────────────────────────────────────────────────────
+    SLOT(void setPin(QString pin))
+    SLOT(void setDuressPin(QString pin))
+    SLOT(void clearPin(QString currentPin))
+    // Entering the duress PIN wipes rather than unlocks, and must be
+    // indistinguishable from a normal unlock to an observer.
+    SLOT(void unlock(QString pin))
+    SLOT(void lock())
+    SLOT(void resetIdentityAndData())
+
+    // ── identity portability ─────────────────────────────────────────────────
+    // Decrypt and read a Peers-mobile .peersenc backup. Adopting its identity is
+    // upstream-blocked (ADR 0004); this reads the payload and imports history.
+    SLOT(void openBackup(QString localPath, QString passphrase))
+    SLOT(void exportBackup(QString destPath, QString passphrase))
+}
