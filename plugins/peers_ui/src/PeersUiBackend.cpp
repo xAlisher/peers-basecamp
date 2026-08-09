@@ -316,7 +316,7 @@ bool PeersUiBackend::loadMessages(const QString& convoId)
                                m.value(QStringLiteral("from_self")).toBool()
                                    ? QStringLiteral("You")
                                    : (sender.isEmpty() ? QStringLiteral("Peer")
-                                                       : shortLabel(sender)));
+                                                       : displayFor(sender)));
             continue;
         }
 
@@ -395,7 +395,7 @@ bool PeersUiBackend::loadMessages(const QString& convoId)
                    m.value(QStringLiteral("timestamp_ms")).toDouble());
         row.insert(QStringLiteral("sender"), sender);
         row.insert(QStringLiteral("senderLabel"),
-                   sender.isEmpty() ? QStringLiteral("Peer") : shortLabel(sender));
+                   sender.isEmpty() ? QStringLiteral("Peer") : displayFor(sender));
 
         // Hosted media: hand the view a local file once we have it, and start
         // the fetch when we do not. The decryption key never reaches QML.
@@ -466,7 +466,7 @@ bool PeersUiBackend::loadMessages(const QString& convoId)
             for (auto it = f.reactors.begin(); it != f.reactors.end(); ++it) {
                 QJsonArray who;
                 for (const QString& r : it.value())
-                    who.append(r.isEmpty() ? QStringLiteral("unknown") : shortLabel(r));
+                    who.append(r.isEmpty() ? QStringLiteral("unknown") : displayFor(r));
                 pills.append(QJsonObject{
                     { QStringLiteral("emoji"), it.key() },
                     { QStringLiteral("count"), it.value().size() },
@@ -789,7 +789,7 @@ void PeersUiBackend::refreshMembers()
         rows.append(QJsonObject{
             { QStringLiteral("address"), address },
             { QStringLiteral("label"),
-              address.isEmpty() ? QStringLiteral("unknown account") : shortLabel(address) },
+              address.isEmpty() ? QStringLiteral("unknown account") : displayFor(address) },
             { QStringLiteral("isSelf"), isSelf },
             { QStringLiteral("pending"), pending },
             { QStringLiteral("avatarSeed"), address },
@@ -1181,12 +1181,22 @@ void PeersUiBackend::refreshContacts()
     for (auto it = m_contacts.begin(); it != m_contacts.end(); ++it) {
         QJsonObject o = it.value().toObject();
         o.insert(QStringLiteral("address"), it.key());
-        if (!o.contains(QStringLiteral("label")))
+        if (o.value(QStringLiteral("label")).toString().isEmpty())
             o.insert(QStringLiteral("label"), shortLabel(it.key()));
+        // The short hex is always available so a row can show both, the way
+        // Android does (label on top, address beneath).
+        o.insert(QStringLiteral("shortAddress"), shortLabel(it.key()));
         rows.append(o);
     }
     setContactsJson(QString::fromUtf8(QJsonDocument(rows).toJson(QJsonDocument::Compact)));
 }
+QString PeersUiBackend::displayFor(const QString& address) const
+{
+    const QString label =
+        m_contacts.value(address).toObject().value(QStringLiteral("label")).toString();
+    return label.isEmpty() ? shortLabel(address) : label;
+}
+
 void PeersUiBackend::setContactLabel(QString address, QString label)
 {
     if (address.isEmpty())
@@ -1195,13 +1205,27 @@ void PeersUiBackend::setContactLabel(QString address, QString label)
     o.insert(QStringLiteral("label"), label);
     m_contacts.insert(address, o);
     saveState();
+
+    // Android's LabelModal writes the label to the conversation row's nickname,
+    // which is what renames the row in the list. Mirror that for the open 1:1 so
+    // labelling someone renames them everywhere at once, not just in bubbles.
+    if (!currentIsGroup() && !currentConversationId().isEmpty()
+        && currentPeerAddress() == address)
+        setConversationNickname(currentConversationId(), label);
+
     refreshContacts();
+    refreshConversations();
+    if (!currentConversationId().isEmpty())
+        loadMessages(currentConversationId());
 }
 void PeersUiBackend::removeContact(QString address)
 {
     m_contacts.remove(address);
     saveState();
     refreshContacts();
+    refreshConversations();
+    if (!currentConversationId().isEmpty())
+        loadMessages(currentConversationId());
 }
 void PeersUiBackend::sendContactCard(QString conversationId, QString address)
 {

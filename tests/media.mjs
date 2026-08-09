@@ -168,7 +168,10 @@ async function main() {
   await shoot(alice, "31-alice-received-photo.png");
 
   // ── oversize is refused, not silently dropped ───────────────────────────
-  const big = path.join(os.tmpdir(), "peers-test-oversize.bin");
+  // A .png, not a .bin: the send path picks the type from the extension, and a
+  // generic blob is now (correctly) routed to hosted media instead of inline —
+  // which is a different refusal with a different message.
+  const big = path.join(os.tmpdir(), "peers-test-oversize.png");
   fs.writeFileSync(big, Buffer.alloc(300 * 1024, 7));
   const errsBefore = JSON.parse(await evalq(bob, "JSON.stringify(root.backend.errors)")).length;
   await evalq(
@@ -184,7 +187,64 @@ async function main() {
   );
   step("oversize: refused with a clear message rather than silently dropped");
 
-  console.log("\nPASS: inline photo sent, decoded and rendered on the peer; oversize refused.");
+  // ── the viewer pages and zooms ──────────────────────────────────────────
+  //
+  // Android's viewer is a pager with pinch and double-tap zoom; the desktop
+  // equivalents are the arrow keys and the wheel. Paging needs two images, so
+  // send a second one.
+  await evalq(
+    alice,
+    `root.backend.sendMedia(${JSON.stringify(convoId)}, ${JSON.stringify(file)}, "photo")`,
+  );
+  await waitFor(
+    async () => {
+      const imgs = JSON.parse(await evalq(alice, "JSON.stringify(root.imagesInThread())"));
+      return imgs.length >= 2;
+    },
+    { timeout: 60000, what: "alice's thread to hold two images" },
+  );
+
+  const imgs = JSON.parse(await evalq(alice, "JSON.stringify(root.imagesInThread())"));
+  await evalq(
+    alice,
+    `root.openViewer(${JSON.stringify(imgs[0].uri)}, ${JSON.stringify(imgs[0].key)})`,
+  );
+  await waitFor(async () => (await evalq(alice, "mediaViewer.visible")) === true, {
+    timeout: 10000,
+    what: "the media viewer to open",
+  });
+  if ((await evalq(alice, "mediaViewer.index")) !== 0)
+    throw new Error("the viewer opened on the wrong image");
+  step(`viewer: opened on the clicked image (1 of ${imgs.length})`);
+
+  await evalq(alice, "mediaViewer.next()");
+  if ((await evalq(alice, "mediaViewer.index")) !== 1)
+    throw new Error("paging forward did not advance the viewer");
+  if ((await evalq(alice, "mediaViewer.current")) !== imgs[1].uri)
+    throw new Error("paging advanced the index but not the displayed image");
+  step("viewer: pages to the next image");
+
+  await evalq(alice, "mediaViewer.zoom = 2.5");
+  if (Number(await evalq(alice, "mediaViewer.zoom")) !== 2.5)
+    throw new Error("zoom did not take");
+  // Paging must reset the zoom, or the next image opens mid-zoom on a random
+  // corner of itself.
+  await evalq(alice, "mediaViewer.prev()");
+  if (Number(await evalq(alice, "mediaViewer.zoom")) !== 1)
+    throw new Error("paging left the previous image's zoom applied");
+  step("viewer: zooms, and paging resets the zoom");
+
+  // Re-open on the first image and let the frame settle: a screenshot taken in
+  // the same tick as the property change captures the PREVIOUS frame, which is
+  // how a viewer that never painted once looked like it had.
+  await new Promise((r) => setTimeout(r, 1500));
+  if ((await evalq(alice, "mediaViewer.visible")) !== true)
+    throw new Error("the viewer closed itself before it could be captured");
+  await shoot(alice, "32-alice-media-viewer.png");
+  await evalq(alice, "mediaViewer.closed()");
+
+  console.log("\nPASS: inline photo sent, decoded and rendered on the peer; "
+    + "oversize refused; viewer pages and zooms.");
   alice.disconnect();
   bob.disconnect();
   process.exit(EXIT_OK);

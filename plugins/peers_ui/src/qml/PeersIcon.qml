@@ -95,7 +95,9 @@ Item {
                                circle(12, 10, 3)] },
         "image":    { stroke: ["M3 3h18v18H3z", circle(9, 9, 2),
                                "m21 15-4.586-4.586a2 2 0 0 0-2.828 0L3 21"] },
-        "play":     { stroke: ["M6 4.5v15l13-7.5z"] }
+        "play":     { stroke: ["M6 4.5v15l13-7.5z"] },
+        "download": { stroke: ["M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4",
+                               "M7 10l5 5 5-5", line(12, 15, 12, 3)] }
     })
 
     readonly property var glyph: glyphs[name] !== undefined

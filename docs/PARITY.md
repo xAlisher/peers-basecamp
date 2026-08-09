@@ -63,7 +63,7 @@ Android ground truth: `docs/FEATURE-INVENTORY.md` (extracted from source with `p
 | Shared contact card (`addr1:`) | yes | `todo` | Codec decodes it, including the `peers:addr?label=` form |
 | Display name | yes | `wip` | Wired to `set_installation_name` |
 | Custom avatar (`pfp1:` / `pfp1:clear`) | yes | `todo` | Codec decodes it |
-| Labels + verified badge | yes | `todo` | |
+| Labels + verified badge | yes | `wip` | A label set from the bubble menu now renames the peer everywhere — bubbles, quoted replies, reaction attribution, group member rows — and mirrors onto the conversation nickname the way Android's LabelModal does. The verified badge is not built |
 
 ## E4 — Media & reactions
 
@@ -75,7 +75,7 @@ Android ground truth: `docs/FEATURE-INVENTORY.md` (extracted from source with `p
 | GIF | yes | `wip` | Transport works and the bubble animates it (`AnimatedImage`); animation not yet asserted by a test |
 | Video | yes | `wip` | Sends with its real mime and always goes hosted (never inline, which would mislabel it as an image); the bubble opens it in the desktop's player — no inline playback, the host has no QtMultimedia |
 | Voice notes, 2:00 cap (`voc1:` wire / `voc1v:` local row) | yes | `done` | Records from a real mic via an external tool (ffmpeg/parecord/arecord — the host has no QtMultimedia), measures duration and 40 waveform bars from the PCM, transcodes to mono AAC and renders on the peer — `tests/voice.mjs`, screenshots 24-26. Playback opens in the desktop's player |
-| Media viewer (zoom / page / save) | yes | `todo` | |
+| Media viewer (zoom / page / save) | yes | `done` | Android's gestures translated to their desktop equivalents: wheel + double-click zoom, drag pan, arrow keys and chevrons to page every image in the thread, and Save. Swipe-to-dismiss has no desktop equivalent and is not faked — `tests/media.mjs`, screenshot 32 |
 | Reactions (`react1:`) | yes | `done` | Pill renders on the peer with count>1 rule; folded so no raw bubble — `tests/interactions.mjs` |
 | Location (`loc1:`) | yes | `done` | Send from the composer (lat/lng dialog); the bubble links out to OpenStreetMap and the menu offers Open in maps / Copy coordinates |
 

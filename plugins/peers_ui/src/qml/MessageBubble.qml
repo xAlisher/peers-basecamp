@@ -36,7 +36,7 @@ Item {
 
     // Raised when the user taps an inline photo, so the view can open the
     // full-size viewer. The bubble itself stays presentational.
-    signal imageClicked(string uri)
+    signal imageClicked(string uri, string messageKey)
 
     // Right-click, or a long press so a touchscreen behaves like the phone.
     // Coordinates are scene-relative so the menu can place itself.
@@ -184,7 +184,7 @@ Item {
 
                     TapHandler {
                         enabled: photo.visible
-                        onTapped: root.imageClicked(photo.source)
+                        onTapped: root.imageClicked(photo.source, String(root.msg.key || ""))
                     }
                 }
 

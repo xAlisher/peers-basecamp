@@ -8,10 +8,10 @@ import "Theme.js" as Theme
 // ground, a 40×40 radius-20 `rgba(0,0,0,0.45)` close circle, loading text in
 // `rgba(255,255,255,0.6)` at 15px (DESIGN-SPEC §5.12).
 //
-// SCOPE: fit-to-view only. The Android viewer's pinch-zoom, double-tap zoom,
-// swipe-to-dismiss and swipe-to-page are gesture-handler/reanimated work with
-// no honest desktop equivalent here, so they are deliberately absent rather
-// than faked. Close is the ✕ or Escape.
+// Android's gestures are translated to their desktop equivalents rather than
+// dropped: pinch-zoom becomes the wheel, double-tap zoom becomes double-click,
+// swipe-to-page becomes the arrow keys and the on-screen chevrons. Close is the
+// ✕ or Escape. Swipe-to-dismiss has no desktop equivalent and is not faked.
 //
 Rectangle {
     id: root
@@ -20,7 +20,29 @@ Rectangle {
     // filesystem or the network.
     property string source: ""
 
+    // Every image in the conversation, as [{ uri, key }], so the viewer can page
+    // the way Android's pager does. `index` selects one; with no list the viewer
+    // falls back to the single `source` it was handed.
+    property var images: []
+    property int index: -1
+
+    readonly property bool paged: index >= 0 && index < images.length
+    readonly property string current: paged ? images[index].uri : source
+    readonly property string currentKey: paged ? images[index].key : ""
+
     signal closed
+    // The caller owns the file dialog and the backend call; the viewer only says
+    // which message the user asked to save.
+    signal saveRequested(string messageKey)
+
+    function next()  { if (paged && index < images.length - 1) { index++; resetZoom(); } }
+    function prev()  { if (paged && index > 0)                 { index--; resetZoom(); } }
+    function resetZoom() { zoom = 1.0; panX = 0; panY = 0; }
+
+    // 1.0 is fit-to-view. Bounded so a stray wheel spin cannot lose the image.
+    property real zoom: 1.0
+    property real panX: 0
+    property real panY: 0
 
     z: 1000
     color: Qt.rgba(0, 0, 0, 0.9)
@@ -32,6 +54,9 @@ Rectangle {
         event.accepted = true;
         root.closed();
     }
+    Keys.onLeftPressed:  function (event) { event.accepted = true; root.prev(); }
+    Keys.onRightPressed: function (event) { event.accepted = true; root.next(); }
+    onCurrentChanged: resetZoom()
     onVisibleChanged: {
         if (visible)
             forceActiveFocus();
@@ -47,15 +72,54 @@ Rectangle {
     // image itself.
     MouseArea {
         anchors.fill: parent
+        acceptedButtons: Qt.LeftButton
+        cursorShape: root.zoom > 1.0
+                     ? (drag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor)
+                     : Qt.ArrowCursor
         onClicked: root.forceActiveFocus()
+        // Double-click toggles between fit and 2x, as double-tap does on Android.
+        onDoubleClicked: {
+            if (root.zoom > 1.0) root.resetZoom();
+            else root.zoom = 2.0;
+        }
+        // Drag pans, but only when there is something to pan to.
+        property real pressX: 0
+        property real pressY: 0
+        property real originX: 0
+        property real originY: 0
+        onPressed: function (mouse) {
+            pressX = mouse.x; pressY = mouse.y;
+            originX = root.panX; originY = root.panY;
+        }
+        onPositionChanged: function (mouse) {
+            if (!pressed || root.zoom <= 1.0)
+                return;
+            root.panX = originX + (mouse.x - pressX);
+            root.panY = originY + (mouse.y - pressY);
+        }
+
+        WheelHandler {
+            // Wheel zooms about the centre. 1.0 is fit; below that the image
+            // would float in dead space, so that is the floor.
+            onWheel: function (event) {
+                root.zoom = Math.max(1.0, Math.min(6.0,
+                    root.zoom * (event.angleDelta.y > 0 ? 1.15 : 1 / 1.15)));
+                if (root.zoom === 1.0) { root.panX = 0; root.panY = 0; }
+            }
+        }
     }
 
     Image {
         id: photo
         anchors.fill: parent
         anchors.margins: Theme.space6
-        source: root.source
+        source: root.current
         fillMode: Image.PreserveAspectFit
+        scale: root.zoom
+        transformOrigin: Item.Center
+        x: root.panX
+        y: root.panY
+        Behavior on scale { NumberAnimation { duration: 90 } }
         // Fit-to-view, centred, never cropped.
         horizontalAlignment: Image.AlignHCenter
         verticalAlignment: Image.AlignVCenter
@@ -70,9 +134,9 @@ Rectangle {
     Text {
         anchors.centerIn: parent
         visible: photo.status === Image.Loading || photo.status === Image.Error
-                 || root.source === ""
+                 || root.current === ""
         text: photo.status === Image.Error ? "media unavailable"
-              : (root.source === "" ? "no media" : "loading…")
+              : (root.current === "" ? "no media" : "loading…")
         // Android spec is rgba(255,255,255,0.6); expressed as the text token at
         // 60% so the colour still comes from Theme. The overlay ground is always
         // black, so this stays legible without a second palette.
@@ -109,5 +173,78 @@ Rectangle {
             cursorShape: Qt.PointingHandCursor
             onClicked: root.closed()
         }
+    }
+
+    // Save, beside the close circle. Only offered when the viewer knows WHICH
+    // message it is showing — saving needs the message, not the pixels.
+    Rectangle {
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.topMargin: Theme.space4
+        anchors.rightMargin: Theme.space4 + 40 + Theme.space2
+        visible: root.currentKey !== ""
+        width: 40
+        height: 40
+        radius: 20
+        color: saveHit.containsMouse ? Qt.rgba(0, 0, 0, 0.65) : Qt.rgba(0, 0, 0, 0.45)
+
+        PeersIcon { anchors.centerIn: parent; name: "download"; size: 20; color: Theme.text }
+
+        MouseArea {
+            id: saveHit
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.saveRequested(root.currentKey)
+        }
+    }
+
+    // Paging chevrons, shown only when there is somewhere to page to.
+    Repeater {
+        model: [{ back: true }, { back: false }]
+        delegate: Rectangle {
+            required property var modelData
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.left: modelData.back ? parent.left : undefined
+            anchors.right: modelData.back ? undefined : parent.right
+            anchors.margins: Theme.space4
+            visible: root.paged
+                     && (modelData.back ? root.index > 0
+                                        : root.index < root.images.length - 1)
+            width: 40
+            height: 40
+            radius: 20
+            color: pageHit.containsMouse ? Qt.rgba(0, 0, 0, 0.65) : Qt.rgba(0, 0, 0, 0.45)
+
+            PeersIcon {
+                anchors.centerIn: parent
+                name: "back"
+                size: 22
+                color: Theme.text
+                rotation: modelData.back ? 0 : 180
+            }
+
+            MouseArea {
+                id: pageHit
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: modelData.back ? root.prev() : root.next()
+            }
+        }
+    }
+
+    // Position, so paging has a sense of place.
+    Text {
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: Theme.space4
+        visible: root.paged && root.images.length > 1
+        text: (root.index + 1) + " / " + root.images.length
+              + (root.zoom > 1.0 ? "   ·   " + Math.round(root.zoom * 100) + "%" : "")
+        color: Theme.text
+        opacity: 0.6
+        font.family: Theme.fontFamily
+        font.pixelSize: Theme.labelSize
     }
 }

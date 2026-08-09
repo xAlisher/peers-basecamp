@@ -50,6 +50,34 @@ Rectangle {
     property bool detailsShown: false
     // The image currently open full-size, "" when the viewer is closed.
     property string viewerSource: ""
+    // Which message a save dialog is about. Both the bubble menu and the viewer
+    // open the same dialog, so the key cannot come from either one implicitly.
+    property string saveKey: ""
+
+    // Every image currently in the thread, as the viewer's pager wants it. Built
+    // on open rather than bound, so paging is stable while messages arrive.
+    function imagesInThread() {
+        const out = [];
+        for (var i = 0; i < root.messages.length; i++) {
+            const m = root.messages[i];
+            const isImage = m.kind === "photo"
+                            || (m.kind === "media"
+                                && String(m.mime || "").indexOf("image/") === 0);
+            if (isImage && String(m.dataUri || "") !== "")
+                out.push({ uri: String(m.dataUri), key: String(m.key) });
+        }
+        return out;
+    }
+
+    function openViewer(uri, key) {
+        const list = root.imagesInThread();
+        var at = -1;
+        for (var i = 0; i < list.length; i++)
+            if (list[i].key === key) { at = i; break; }
+        mediaViewer.images = list;
+        mediaViewer.index = at;
+        root.viewerSource = uri;
+    }
 
     // Outcome of the last backup open, as "ok:<convos>:<messages>" or
     // "fail:<reason>". Slot returns cannot cross QtRO, so the backend reports
@@ -402,7 +430,7 @@ Rectangle {
                         required property var modelData
                         width: thread.width
                         msg: modelData
-                        onImageClicked: function (uri) { root.viewerSource = uri; }
+                        onImageClicked: function (uri, key) { root.openViewer(uri, key); }
                         onMenuRequested: function (m, sx, sy) {
                             bubbleMenu.msg = m;
                             bubbleMenu.hasLabel = root.labelFor(m.sender) !== "";
@@ -536,7 +564,7 @@ Rectangle {
                 toast.show("Copied");
         }
         onForward: { root.forwardSource = bubbleMenu.msg; forwardPicker.open(); }
-        onSaveMedia: saveDialog.open()
+        onSaveMedia: { root.saveKey = bubbleMenu.msg.key; saveDialog.open(); }
         onOpenInMaps: Qt.openUrlExternally(
             "https://www.openstreetmap.org/?mlat=" + bubbleMenu.msg.lat
             + "&mlon=" + bubbleMenu.msg.lng)
@@ -581,10 +609,12 @@ Rectangle {
 
     // ── full-size media ─────────────────────────────────────────────────────
     MediaViewer {
+        id: mediaViewer
         anchors.fill: parent
         visible: root.viewerSource !== ""
         source: root.viewerSource
-        onClosed: root.viewerSource = ""
+        onClosed: { root.viewerSource = ""; images = []; index = -1; }
+        onSaveRequested: function (key) { root.saveKey = key; saveDialog.open(); }
     }
 
     // ── add a member to the current group ───────────────────────────────────
@@ -826,8 +856,8 @@ Rectangle {
         id: saveDialog
         title: "Save media"
         fileMode: FileDialog.SaveFile
-        onAccepted: root.call(root.backend.saveMedia(bubbleMenu.msg.key,
-                                                     selectedFile.toString().replace("file://", "")))
+        onAccepted: root.call(root.backend.saveMedia(
+            root.saveKey, selectedFile.toString().replace("file://", "")))
     }
 
     // Attach a file to send.
@@ -840,7 +870,9 @@ Rectangle {
         onAccepted: {
             // A plain filesystem path, never a file:// URL — sendMedia requires it.
             const p = selectedFile.toString().replace("file://", "");
-            root.call(root.backend.sendMedia(root.backend.currentConversationId, p, "photo"));
+            const audio = /\.(m4a|mp3|ogg|opus|wav)$/i.test(p);
+            root.call(root.backend.sendMedia(root.backend.currentConversationId, p,
+                                             audio ? "voice" : "media"));
         }
     }
 

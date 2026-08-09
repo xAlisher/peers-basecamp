@@ -137,7 +137,7 @@ Item {
                       show: root.addressKnown, danger: false },
                     { key: "forward", icon: "send",   label: "Forward",
                       show: true, danger: false },
-                    { key: "save",    icon: "copy",   label: "Save to disk",
+                    { key: "save",    icon: "download", label: "Save to disk",
                       show: root.isImage || root.isHosted || root.isVoice, danger: false },
                     { key: "maps",    icon: "search", label: "Open in maps",
                       show: root.isLocation, danger: false },

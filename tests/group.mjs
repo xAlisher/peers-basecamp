@@ -191,7 +191,73 @@ async function main() {
     step(`  NOTE: ${e.message} — messages flow, so the commit may lag the roster read`);
   }
 
-  console.log("\nPASS: group created, member added, messages both ways.");
+  // ── the same chat features must work IN A GROUP, not only in a 1:1 ──────
+  //
+  // A group is where these are easiest to get wrong: the reply key, the reaction
+  // attribution and the sender label all depend on knowing WHO sent what, which
+  // a 1:1 lets you fake by assuming "the other one".
+
+  async function findByText(insp, text) {
+    const n = await evalq(insp, "root.messages.length");
+    for (let i = 0; i < n; i++) {
+      if ((await evalq(insp, `root.messages[${i}].text`)) === text) {
+        return JSON.parse(await evalq(insp, `JSON.stringify(root.messages[${i}])`));
+      }
+    }
+    return null;
+  }
+
+  // Every incoming group bubble must be attributed. An unattributed bubble in a
+  // group is unreadable — you cannot tell who is talking.
+  const bobsMsg = await findByText(alice, BOB_MSG);
+  if (!bobsMsg.senderLabel || bobsMsg.senderLabel === "")
+    throw new Error("bob's group message arrived with no sender label");
+  if (bobsMsg.fromSelf !== false)
+    throw new Error("bob's message is marked fromSelf on alice's client");
+  step(`group bubbles are attributed (sender "${bobsMsg.senderLabel}")`);
+
+  // Reply, in a group.
+  const GROUP_REPLY = "replying inside the group";
+  await evalq(
+    alice,
+    `root.backend.sendReply(${JSON.stringify(groupId)}, ${JSON.stringify(GROUP_REPLY)}, ` +
+      `${JSON.stringify(bobsMsg.key)})`,
+  );
+  await waitFor(async () => (await findByText(bob, GROUP_REPLY)) !== null, {
+    timeout: 150000,
+    network: true,
+    what: "bob to receive the group reply",
+  });
+  const reply = await findByText(bob, GROUP_REPLY);
+  if (reply.kind !== "reply") throw new Error(`group reply decoded as "${reply.kind}"`);
+  if (reply.quotedText !== BOB_MSG)
+    throw new Error(`group reply quotes "${reply.quotedText}", expected "${BOB_MSG}"`);
+  step("group reply: quotes the right message on the peer");
+
+  // Reaction, in a group — including who it is attributed to.
+  await evalq(
+    alice,
+    `root.backend.reactToMessage(${JSON.stringify(groupId)}, ${JSON.stringify(bobsMsg.key)}, "👍")`,
+  );
+  await waitFor(
+    async () => {
+      const m = await findByText(bob, BOB_MSG);
+      return m !== null && (m.reactions || []).length > 0;
+    },
+    { timeout: 150000, network: true, what: "the group reaction to reach bob" },
+  );
+  const reacted = await findByText(bob, BOB_MSG);
+  const pill = reacted.reactions[0];
+  if (pill.emoji !== "👍") throw new Error(`group reaction pill shows "${pill.emoji}"`);
+  if (!Array.isArray(pill.who) || pill.who.length !== 1)
+    throw new Error("the group reaction is not attributed to exactly one reactor");
+  step(`group reaction: folded and attributed (${pill.emoji} by ${pill.who.join(", ")})`);
+
+  await shoot(bob, "14-bob-group-interactions.png");
+  await shoot(alice, "15-alice-group-interactions.png");
+
+  console.log("\nPASS: group created, member added, messages both ways, "
+    + "plus attribution, reply and reaction inside the group.");
   alice.disconnect();
   bob.disconnect();
   process.exit(EXIT_OK);

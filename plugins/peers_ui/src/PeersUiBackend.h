@@ -169,6 +169,11 @@ private:
     QHash<QString, QString> m_lastPreview;
 
     QTimer* m_healthTimer = nullptr;
+    // A peer's display name: the local, private label the user gave them if
+    // there is one, else the short hex form. Labels are never broadcast — this
+    // is a rendering choice, not a protocol one.
+    QString displayFor(const QString& address) const;
+
     // Logos-Storage client for hosted media (the store2: path). Null until
     // first use.
     StorageClient* m_storage = nullptr;
