@@ -50,6 +50,12 @@ Rectangle {
     // The image currently open full-size, "" when the viewer is closed.
     property string viewerSource: ""
 
+    // Outcome of the last backup open, as "ok:<convos>:<messages>" or
+    // "fail:<reason>". Slot returns cannot cross QtRO, so the backend reports
+    // through signals and the view holds the result.
+    property string lastBackup: ""
+
+
     function reparse() {
         if (!backend)
             return;
@@ -111,6 +117,13 @@ Rectangle {
         function onCurrentPinnedJsonChanged() { root.reparse(); }
         function onCurrentConversationIdChanged() { root.detailsShown = false; }
         function onError(message) { errorStrip.show(message); }
+        function onBackupOpened(address, conversationCount, messageCount) {
+            root.lastBackup = "ok:" + conversationCount + ":" + messageCount;
+        }
+        function onBackupFailed(reason) {
+            root.lastBackup = "fail:" + reason;
+            errorStrip.show(reason);
+        }
         function onSendFailed(conversationId, content) {
             // Hand the text back rather than losing it.
             composer.text = content;

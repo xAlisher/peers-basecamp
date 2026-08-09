@@ -16,6 +16,8 @@ logos_module(
         src/PeersUiBackend.cpp
         src/ContentMarkers.h
         src/ContentMarkers.cpp
+        src/BackupReader.h
+        src/BackupReader.cpp
     INCLUDE_DIRS
         src
 )

@@ -5,31 +5,47 @@
   "type": "ui_qml",
   "interface": "universal",
   "category": "chat",
-  "description": "Peers — end-to-end-encrypted messaging on Logos. Conversations, groups, contacts, media and voice notes, in the Peers design language.",
+  "description": "Peers \u2014 end-to-end-encrypted messaging on Logos. Conversations, groups, contacts, media and voice notes, in the Peers design language.",
   "main": "peers_ui_plugin",
   "view": "qml/PeersView.qml",
   "icon": "qml/icons/Peers_sidebar.png",
-  "dependencies": ["chat_module", "delivery_module"],
-
+  "dependencies": [
+    "chat_module",
+    "delivery_module"
+  ],
   "codegen": {
     "rep": "src/peers_ui.rep",
     "backend_class": "PeersUiBackend",
     "backend_header": "PeersUiBackend.h"
   },
-
   "dependency_overrides": {
     "delivery_module": {
       "input": "chat_module",
       "file": "rust-lib/deps/delivery_module.lidl"
     }
   },
-
   "nix": {
     "packages": {
-      "build": [],
-      "runtime": ["qt6.qtdeclarative", "zstd", "krb5", "abseil-cpp"]
+      "build": [
+        "pkg-config"
+      ],
+      "runtime": [
+        "qt6.qtdeclarative",
+        "zstd",
+        "krb5",
+        "abseil-cpp",
+        "openssl"
+      ]
     },
     "external_libraries": [],
-    "cmake": { "find_packages": [], "extra_sources": [] }
+    "cmake": {
+      "find_packages": [
+        "OpenSSL"
+      ],
+      "extra_sources": [],
+      "extra_link_libraries": [
+        "OpenSSL::Crypto"
+      ]
+    }
   }
 }

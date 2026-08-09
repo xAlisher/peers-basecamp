@@ -7,7 +7,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 rc=0
-for t in tests/ui-tour.mjs tests/exchange.mjs tests/group.mjs tests/interactions.mjs tests/media.mjs; do
+for t in tests/backup.mjs tests/ui-tour.mjs tests/exchange.mjs tests/group.mjs tests/interactions.mjs tests/media.mjs; do
   echo "═══════════════════════════════════════ $t"
   TEST="$t" ./scripts/run-exchange.sh 2>&1 | grep -vE "\[delivery_module\]|\[chat_module\]" | tail -25
   s=${PIPESTATUS[0]}

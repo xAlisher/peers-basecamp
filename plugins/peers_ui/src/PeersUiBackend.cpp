@@ -13,6 +13,7 @@
 #include <QStandardPaths>
 #include <QTimer>
 
+#include "BackupReader.h"
 #include "ContentMarkers.h"
 
 namespace {
@@ -945,10 +946,40 @@ void PeersUiBackend::resetIdentityAndData()
 }
 void PeersUiBackend::openBackup(QString localPath, QString passphrase)
 {
-    Q_UNUSED(localPath) Q_UNUSED(passphrase)
-    // The decryptor lands with its tests; adopting the identity is upstream
-    // blocked (ADR 0004).
-    Q_EMIT backupFailed(QStringLiteral("Reading a Peers backup is not wired up yet."));
+    if (localPath.isEmpty()) {
+        Q_EMIT backupFailed(QStringLiteral("Choose a backup file first."));
+        return;
+    }
+    QFile f(localPath);
+    if (!f.open(QIODevice::ReadOnly)) {
+        Q_EMIT backupFailed(QStringLiteral("Could not read %1").arg(QFileInfo(localPath).fileName()));
+        return;
+    }
+    const QByteArray envelope = f.readAll();
+    f.close();
+
+    const BackupReader::Result res = BackupReader::open(envelope, passphrase);
+    if (!res.ok) {
+        Q_EMIT backupFailed(res.error);
+        return;
+    }
+
+    // The backup carries an identity seed, but chat_module 0.2.2 has nowhere to
+    // put it — there is no import method on the contract (ADR 0004). Say so
+    // plainly instead of implying the desktop client has become that identity.
+    if (res.hasIdentity) {
+        report(QStringLiteral(
+                   "Backup opened: %1 conversations, %2 messages. It contains an identity "
+                   "(%3 bytes), but this build cannot adopt it — the chat core has no "
+                   "identity-import method yet.")
+                   .arg(res.conversationCount)
+                   .arg(res.messageCount)
+                   .arg(res.identityBytes));
+    }
+
+    // The address the backup belonged to is not derivable here without the core,
+    // so report the empty string rather than guessing one.
+    Q_EMIT backupOpened(QString(), res.conversationCount, res.messageCount);
 }
 void PeersUiBackend::exportBackup(QString destPath, QString passphrase)
 {

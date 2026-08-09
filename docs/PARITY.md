@@ -96,7 +96,7 @@ Android ground truth: `docs/FEATURE-INVENTORY.md` (extracted from source with `p
 | Feature | Android | Basecamp | Notes |
 |---|---|---|---|
 | Backup export (passphrase) | yes | `todo` | |
-| Read a `.peersenc` backup | yes | `todo` | Format fully specified in `docs/BACKUP-FORMAT.md` |
+| Read a `.peersenc` backup | yes | `done` | Decrypts a **Node-written** envelope (cross-implementation, so drift on either side fails); refuses wrong passphrase, junk and legacy plaintext by name — `tests/backup.mjs` |
 | **Adopt the backup identity (same address)** | yes | **`blocked`** | **`chat_module` 0.2.2 exposes no identity-import method** — the whole surface is `get/set_installation_name` + `get_address`, and `init(ChatConfig)` takes only `delivery_preset` and `log_level`. See ADR 0004. Next step: upstream feature request |
 | Import history / contacts / nicknames | yes | `todo` | Not blocked — needs only the decryptor |
 | About | yes | `todo` | |
