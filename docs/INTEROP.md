@@ -57,8 +57,8 @@ Status: `—` not yet run · `✅` passed with evidence · `❌` failed · `⚠�
 | Distinct identities (different `get_address()`) | ✅ pass | alice `3ef6eb6c…`, bob `c99690f3…` |
 | Storage isolation per `--user-dir` | ✅ pass | separate `module_data/chat_module/<id>` per instance |
 | **MLS invite propagates between two `peers_ui` instances** | ✅ pass | `alice joined the conversation` on attempt 1 |
-| 1:1 text, A → B | ❌ open | message never appears in either thread — see below |
-| 1:1 text, B → A | — | blocked on the above |
+| **1:1 text, A → B** | ✅ pass | `scripts/run-exchange.sh` — 2 consecutive green runs |
+| **1:1 text, B → A** | ✅ pass | reply received by the sender |
 | Group: create | — | |
 | Group: add member, roster visible to all | — | |
 | Group: message to all members | — | |
@@ -72,29 +72,31 @@ Status: `—` not yet run · `✅` passed with evidence · `❌` failed · `⚠�
 | Forward | — | |
 | Ordering + offline catch-up | — | |
 
-### Open: messages do not appear after `send_message`
+### Resolved: the "messages never arrive" symptom was a stale instance
 
-`scripts/run-exchange.sh` gets as far as a joined conversation and then stalls. State dump from both
-sides at failure:
+Every symptom in the first investigation — the selection reading back empty, three conversations
+appearing, messages never showing — came from **testing a leaked process, not the new build**.
 
-```
-root.backend.currentConversationId = ""      (on BOTH, after selectConversation was called)
-root.backend.messagesJson          = "[]"
-root.conversations.length          = 3       (identical convoIds on both sides)
-root.backend.errors                = []      (send_message reported no error)
-```
+`logos-standalone-app-bin` forks `logos_host_qt` children per module. Killing the `nix run` wrapper
+left all of them alive holding the inspector ports, so each rebuild launched instances that could not
+bind and the harness silently connected to the **old** ones. Identity and conversations therefore
+looked like they persisted across a wipe, and fixes appeared to do nothing.
 
-Two distinct things to chase, in order:
+`scripts/run-exchange.sh` now launches under `setsid`, kills the process group, matches on **argv**
+(`comm`/`exe` are the ld-linux loader), and **preflights the ports — aborting rather than proceeding
+onto a stale instance.**
 
-1. **`selectConversation` does not stick.** `currentConversationId` reads back as `""` even after the
-   harness called it explicitly. Until the selection holds, `loadMessages` never runs for the right
-   conversation and `message_sent` is filtered out by the `convoId == currentConversationId()` guard.
-   Suspect the writable `PROP(QString currentConversationId)` round-trip through the QtRO replica.
-2. **One invite produced three conversations**, with identical ids on both sides. `create_conversation`
-   was called once. Understand this before trusting any message assertion — a send may be going to a
-   different conversation than the one being read.
+Two further harness bugs it flushed out, both of which produced convincing false negatives:
 
-Neither is a network problem: `errors` is empty and the join succeeded.
+- Waiting on `currentConversationId` rather than the conversation **list** conflated "the core never
+  created it" with "the view didn't select it", and reported a network fault for our own bug.
+- After a join retry there are two conversations; alice picked `conversations[0]` while bob sent to a
+  different one. Both sides now pin the **shared convo id** — identified by diffing bob's id set
+  before and after the call, since `list_conversations` has no documented ordering.
+
+The join step itself is genuinely flaky: across five runs it landed first try three times, needed a
+retry once, and failed all three attempts once. The retry loop and the distinct `EXIT_NETWORK` code
+exist for exactly that.
 
 ## Desktop ⇄ Peers Android matrix
 

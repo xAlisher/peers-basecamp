@@ -23,12 +23,12 @@ Android ground truth: `docs/FEATURE-INVENTORY.md` (extracted from source with `p
 
 | Feature | Android | Basecamp | Notes |
 |---|---|---|---|
-| Conversation list + rows | yes | `wip` | Empty state verified on screen; rows unverified (needs a live conversation) |
+| Conversation list + rows | yes | `wip` | List populates from live conversations (harness); row rendering not yet screenshot-verified |
 | Conversation row menu (open/group info/delete) | yes | `todo` | Android has no archive/mute/pin-conversation |
 | Chat thread + bubbles | yes | `wip` | `MessageBubble` built to spec; unverified |
 | Day separator chips | yes | `todo` | |
 | Composer + drafts | yes | `wip` | Draft persistence in the backend; UI unverified |
-| Send / receive | yes | `wip` | Backend wired to `send_message` + events |
+| Send / receive | yes | `done` | Two-instance round-trip, 2 consecutive green runs (`scripts/run-exchange.sh`) |
 | Send state: pending / failed / retry | yes | `wip` | |
 | **Delivered / read receipts** | **no** | **`dropped`** | Android has none (`ChatScreen.tsx:3`). Do not invent them |
 | Reply / quote | yes | `todo` | Codec decodes `reply1:`; send path not wired |
@@ -56,7 +56,7 @@ Android ground truth: `docs/FEATURE-INVENTORY.md` (extracted from source with `p
 | Feature | Android | Basecamp | Notes |
 |---|---|---|---|
 | Contacts list + search | yes | `todo` | Backend stores contacts locally |
-| Add contact by address paste | yes | `wip` | New-chat dialog built and rendering; the round trip is unverified |
+| Add contact by address paste | yes | `done` | `create_conversation` verified end to end against a real peer |
 | My address + short label | yes | `done` | Live address read from `chat_module` and rendered; screenshot |
 | My address QR card | yes | `todo` | |
 | QR scan | yes | `todo` | Desktop has no rear camera — needs an ADR (webcam / file / screen region) |

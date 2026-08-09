@@ -10,6 +10,18 @@
 #   1  a real assertion failed
 #   2  the invite never landed — the known-flaky join step, re-run before digging
 #
+# PROCESS HYGIENE — read this before touching the launch/cleanup code.
+#
+# The app is `logos-standalone-app-bin`, which forks `logos_host_qt` children per
+# module. Killing the `nix run` wrapper leaves ALL of them alive, still holding
+# the inspector ports. A later run then launches instances that cannot bind, and
+# the harness silently connects to the STALE ones — so you test an old build and
+# watch state accumulate across runs while your fixes appear to do nothing.
+# That cost a debugging cycle on 2026-08-09.
+#
+# Hence: launch under setsid and kill the whole process group, match on ARGV (not
+# comm/exe, which are the ld-linux loader), and preflight the ports.
+#
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -18,32 +30,51 @@ WORK=${WORK:-/extra/tmp/peers-exchange}
 A_PORT=${A_PORT:-5591}
 B_PORT=${B_PORT:-5592}
 
+reap() { # kill anything of ours still running
+  for n in alice bob; do
+    if [ -f "$WORK/$n.pgid" ]; then
+      kill -- -"$(cat "$WORK/$n.pgid")" 2>/dev/null
+    fi
+  done
+  pkill -f '[l]ogos-standalone-app-bin' 2>/dev/null
+  pkill -f '[l]ogos_host_qt' 2>/dev/null
+  sleep 2
+}
+
+# ── preflight ───────────────────────────────────────────────────────────────
+# A busy inspector port means a previous run leaked. Never proceed onto a stale
+# instance — that is how you spend an hour testing a build you already replaced.
+for p in "$A_PORT" "$B_PORT"; do
+  if ss -tln | grep -q ":$p "; then
+    echo "preflight: port $p is in use by a leaked instance — reaping"
+    reap
+    break
+  fi
+done
+for p in "$A_PORT" "$B_PORT"; do
+  if ss -tln | grep -q ":$p "; then
+    echo "ABORT: port $p is still held after reaping. Investigate before re-running;"
+    echo "       continuing would test a stale instance."
+    ss -tlnp | grep ":$p " || true
+    exit 1
+  fi
+done
+
 rm -rf "$WORK"; mkdir -p "$WORK/alice" "$WORK/bob"
+trap reap EXIT
 
 launch() { # name, user-dir, inspector port
   ( cd "$MOD" && \
     QT_QPA_PLATFORM=offscreen QML_INSPECTOR_PORT="$3" TMPDIR=/extra/tmp \
-    nix run . --accept-flake-config -- --user-dir "$2" \
-    > "$WORK/$1.log" 2>&1 & echo $! > "$WORK/$1.pid" )
+    setsid nix run . --accept-flake-config -- --user-dir "$2" \
+      > "$WORK/$1.log" 2>&1 &
+    echo $! > "$WORK/$1.pgid" )   # setsid makes the child its own group leader
 }
-
-cleanup() {
-  for n in alice bob; do
-    [ -f "$WORK/$n.pid" ] && kill "$(cat "$WORK/$n.pid")" 2>/dev/null
-  done
-  # The standalone runner spawns a ui-host child; match on argv, since comm/exe
-  # are the ld-linux loader.
-  pkill -f "ui-host --name peers_ui" 2>/dev/null
-  wait 2>/dev/null
-}
-trap cleanup EXIT
 
 echo "launching two instances (inspectors on $A_PORT / $B_PORT)..."
 launch alice "$WORK/alice" "$A_PORT"
 launch bob   "$WORK/bob"   "$B_PORT"
 
-# Wait for both inspectors rather than sleeping a fixed amount — the first run
-# after a rebuild has to realise the store paths.
 for i in $(seq 1 60); do
   if ss -tln | grep -q ":$A_PORT " && ss -tln | grep -q ":$B_PORT "; then
     echo "both inspectors listening"; break
@@ -55,7 +86,7 @@ node tests/exchange.mjs "$A_PORT" "$B_PORT"
 rc=$?
 
 if [ $rc -ne 0 ]; then
-  echo "--- alice tail ---"; tail -20 "$WORK/alice.log"
-  echo "--- bob tail ---";   tail -20 "$WORK/bob.log"
+  echo "--- alice tail ---"; grep -vE "\[delivery_module\]" "$WORK/alice.log" | tail -15
+  echo "--- bob tail ---";   grep -vE "\[delivery_module\]" "$WORK/bob.log"   | tail -15
 fi
 exit $rc

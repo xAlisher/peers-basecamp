@@ -158,9 +158,19 @@ async function main() {
 
   // ── the invite, with retries (see JOIN FLAKINESS above) ──────────────────
   let joined = false;
+  let convoId = null;   // the shared conversation id both sides must use
   const ATTEMPTS = 3;
   for (let attempt = 1; attempt <= ATTEMPTS && !joined; attempt++) {
     step(`bob: create_conversation (attempt ${attempt}/${ATTEMPTS})...`);
+    // Snapshot bob's ids first, so the conversation THIS attempt creates can be
+    // identified exactly. list_conversations has no documented ordering, so
+    // "the last one" is not reliable after a retry.
+    const idsBefore = String(
+      await evalq(bob, "root.conversations.map(function (c) { return c.convoId; }).join(',')"),
+    )
+      .split(",")
+      .filter(Boolean);
+
     await evalq(bob, `root.backend.createConversation(${JSON.stringify(address)})`);
     try {
       // Wait on the CONVERSATION LIST, not on currentConversationId: the list is
@@ -168,18 +178,39 @@ async function main() {
       // Gating on the selection conflates "the core never created it" with "the
       // view didn't auto-select it", which sent an earlier run down a false
       // "the network is flaky" path when the real cause was ours.
-      await waitFor(async () => (await evalq(bob, "root.conversations.length")) >= 1, {
-        timeout: 45000,
-        what: "bob's conversation to exist locally",
-      });
+      await waitFor(
+        async () => {
+          const now = String(
+            await evalq(bob, "root.conversations.map(function (c) { return c.convoId; }).join(',')"),
+          )
+            .split(",")
+            .filter(Boolean);
+          const fresh = now.filter((id) => !idsBefore.includes(id));
+          if (fresh.length === 0) return false;
+          convoId = fresh[0];
+          return true;
+        },
+        { timeout: 45000, what: "bob's new conversation to exist locally" },
+      );
     } catch {
       continue;
     }
+    // Pin the conversation THIS attempt created, and make alice join that exact
+    // one. A retry creates an additional conversation, so "alice has >= 1" and
+    // "alice picks conversations[0]" can disagree with the one bob is sending
+    // to — which fails as a bogus "message never arrived".
+    // The convo id is shared across members in MLS, so it is the right key.
     try {
-      await waitFor(async () => (await evalq(alice, "root.conversations.length")) >= 1, {
-        timeout: 120000,
-        what: "alice to join the conversation",
-      });
+      await waitFor(
+        async () => {
+          const ids = await evalq(
+            alice,
+            "root.conversations.map(function (c) { return c.convoId; }).join(',')",
+          );
+          return String(ids).split(",").includes(convoId);
+        },
+        { timeout: 120000, what: `alice to join conversation ${convoId}` },
+      );
       joined = true;
     } catch {
       step(`  invite did not land on attempt ${attempt}`);
@@ -201,11 +232,10 @@ async function main() {
   step("alice joined the conversation");
 
   // ── bob → alice ─────────────────────────────────────────────────────────
-  let bobConvo = await evalq(bob, "root.backend.currentConversationId");
-  if (!bobConvo) {
-    bobConvo = await evalq(bob, "root.conversations[0].convoId");
-    await evalq(bob, `root.backend.selectConversation(${JSON.stringify(bobConvo)})`);
-  }
+  // Always select explicitly: after a retry, the auto-selected conversation may
+  // not be the one that actually got joined.
+  const bobConvo = convoId;
+  await evalq(bob, `root.backend.selectConversation(${JSON.stringify(bobConvo)})`);
   await evalq(
     bob,
     `root.backend.sendMessage(${JSON.stringify(bobConvo)}, ${JSON.stringify(BOB_MSG)})`,
@@ -216,8 +246,8 @@ async function main() {
   });
   step("bob: sent");
 
-  // Alice selects the conversation and must actually see it.
-  const aliceConvo = await evalq(alice, "root.conversations[0].convoId");
+  // Alice selects the SAME conversation id, not conversations[0].
+  const aliceConvo = convoId;
   await evalq(alice, `root.backend.selectConversation(${JSON.stringify(aliceConvo)})`);
   await waitFor(
     async () => {
