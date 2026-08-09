@@ -149,6 +149,18 @@ async function main() {
     { timeout: 150000, network: true, what: "alice to see the pin" },
   );
   step("pin: propagates to the peer");
+
+  // The bar must actually be on screen, and tapping it must land on the pinned
+  // message — a bar that says something is pinned and then leaves you to find
+  // it is worse than no bar.
+  await new Promise((r) => setTimeout(r, 1200));   // let the frame settle
+  if ((await evalq(alice, "pinnedBar.visible")) !== true)
+    throw new Error("a message is pinned but the pinned bar is not visible");
+  if ((await evalq(alice, `root.jumpToMessage(${JSON.stringify(onAlice.key)})`)) !== true)
+    throw new Error("jumping to the pinned message failed");
+  if ((await evalq(alice, "root.highlightKey")) !== onAlice.key)
+    throw new Error("the jump did not highlight the message it landed on");
+  step("pinned bar: visible, and jumps to the pinned message");
   await shoot(alice, "22-alice-sees-pin.png");
 
   // ── unpin ───────────────────────────────────────────────────────────────

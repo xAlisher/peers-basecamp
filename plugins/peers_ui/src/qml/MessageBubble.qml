@@ -19,6 +19,9 @@ Item {
     // content-marker codec has already run in the backend.
     required property var msg
 
+    // Briefly outlined after the pinned bar jumps here.
+    property bool highlighted: false
+
     readonly property bool own: msg.fromSelf === true
     readonly property string kind: msg.kind !== undefined ? msg.kind : "text"
     readonly property bool failed: msg.state === "failed"
@@ -128,8 +131,9 @@ Item {
             color: root.own ? Theme.bubbleOwn : Theme.bubblePeer
             // A failed send is outlined, not recoloured — the text must stay
             // readable while the user decides whether to resend.
-            border.width: root.failed ? Theme.hairline : 0
-            border.color: Theme.unread
+            border.width: root.failed || root.highlighted ? Theme.hairline : 0
+            border.color: root.failed ? Theme.unread : Theme.accent
+            Behavior on border.width { NumberAnimation { duration: 150 } }
             opacity: root.pending ? 0.55 : 1.0
 
             ColumnLayout {

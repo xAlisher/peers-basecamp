@@ -56,6 +56,9 @@ Rectangle {
     // The contact whose card is being shared, "" when the picker is forwarding a
     // message instead. Both routes end at the same picker.
     property string shareAddress: ""
+    // The message the pinned bar just jumped to, briefly outlined so the eye can
+    // find it. Cleared on a timer — a permanent highlight reads as selection.
+    property string highlightKey: ""
 
     // Every image currently in the thread, as the viewer's pager wants it. Built
     // on open rather than bound, so paging is stable while messages arrive.
@@ -70,6 +73,24 @@ Rectangle {
                 out.push({ uri: String(m.dataUri), key: String(m.key) });
         }
         return out;
+    }
+
+    // Scroll the thread to a message by its key. Returns false when the message
+    // is not in the loaded history — which is a real case (pinned before we
+    // joined, or deleted for me), so it says so rather than jumping to nothing.
+    function jumpToMessage(key) {
+        if (!key)
+            return false;
+        for (var i = 0; i < root.messages.length; i++) {
+            if (root.messages[i].key === key) {
+                thread.positionViewAtIndex(i, ListView.Center);
+                root.highlightKey = key;
+                highlightTimer.restart();
+                return true;
+            }
+        }
+        toast.show("That message isn't in this view");
+        return false;
     }
 
     function openViewer(uri, key) {
@@ -410,6 +431,7 @@ Rectangle {
                 }
 
                 PinnedBar {
+                    id: pinnedBar
                     Layout.fillWidth: true
                     // Setting `visible` here REPLACES the component's own
                     // `visible: pinKey !== ""`, so the empty-pin condition has to
@@ -419,6 +441,10 @@ Rectangle {
                              && root.pinned.key !== undefined && root.pinned.key !== ""
                     pinned: root.pinned
                     onUnpin: root.call(root.backend.unpinMessage(root.backend.currentConversationId))
+                    // Tapping the bar takes you to the message it is about —
+                    // otherwise the bar tells you something is pinned and then
+                    // leaves you to find it.
+                    onJumpTo: function (key) { root.jumpToMessage(key); }
                 }
 
                 ListView {
@@ -437,6 +463,8 @@ Rectangle {
                         required property var modelData
                         width: thread.width
                         msg: modelData
+                        highlighted: root.highlightKey !== ""
+                                     && String(modelData.key) === root.highlightKey
                         onImageClicked: function (uri, key) { root.openViewer(uri, key); }
                         onAddContact: function (address, label) {
                             if (label !== "")
@@ -641,6 +669,12 @@ Rectangle {
     }
 
     // ── full-size media ─────────────────────────────────────────────────────
+    Timer {
+        id: highlightTimer
+        interval: 1600
+        onTriggered: root.highlightKey = ""
+    }
+
     MediaViewer {
         id: mediaViewer
         anchors.fill: parent

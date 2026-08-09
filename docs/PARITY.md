@@ -46,7 +46,7 @@ Android ground truth: `docs/FEATURE-INVENTORY.md` (extracted from source with `p
 | Group info / roster, pending invites | yes | `wip` | Committed count (2) **and the pending window** both verified — the backend nudges `refreshMembers` after an invite so the in-flight state is visible (`14-bob-pending-invite.png`). Roster UI still to integrate |
 | Leave group (remote) | yes | `blocked` | **No core primitive.** `chat_module` 0.2.2 offers only `delete_conversation`, which is local. Next step: upstream request, or a `leave1:` marker convention matching Android |
 | Rename group / remove member / wipe | yes | `todo` | Check against the contract before promising |
-| Pinned messages + pinned bar (`pin1:`) | yes | `wip` | Pin/unpin propagate cross-device and drive `currentPinnedJson`; **no pinned bar UI yet** |
+| Pinned messages + pinned bar (`pin1:`) | yes | `done` | Pin/unpin propagate cross-device; the bar renders above the thread and **tapping it scrolls to the pinned message** and outlines it briefly. Verified on the peer — bar visible, jump lands, highlight set — `tests/interactions.mjs`, screenshot 22 |
 | Group avatar | yes | `done` | Group identicon renders in row and header — screenshot `interop-desktop/13-bob-group-roundtrip.png` |
 | Group storage opt-out (`gcfg1:`) | yes | `todo` | |
 | Desync auto-recovery / re-add request (`readd1:`) | yes | `todo` | Control marker; folded, never a bubble |
