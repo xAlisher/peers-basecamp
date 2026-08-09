@@ -115,13 +115,31 @@ exist for exactly that.
 
 | Cell | Status | Evidence |
 |---|---|---|
-| 1:1 text, desktop → phone | — | |
-| 1:1 text, phone → desktop | — | |
+| 1:1 text, desktop → phone | ❌ blocked | MLS add-proposal rejected — see below |
+| 1:1 text, phone → desktop | ❌ blocked | same |
 | Group with a phone member | — | |
 | Photo / GIF / video | — | |
 | Voice note | — | |
 | Reply / reaction / pin | — | |
 | Same address from a mobile backup | 🚧 blocked | ADR 0004 — `chat_module` 0.2.2 has no identity-import method |
+
+### Why the Android axis is blocked (2026-08-09)
+
+Adding the desktop address on Peers Android 0.9.9 fails with
+`create_conversation failed: generic: The capabilities of the add proposal are insufficient for this
+group.` — an OpenMLS capabilities rejection.
+
+Ruled out by direct check, **not** by assumption:
+
+- **Not the network.** Both are Waku cluster 2, 8 shards, same `/kym/1/<addr>/proto` namespace.
+  Different entry nodes (Android pins `msg.logos.live`, Basecamp uses the `logos.test` preset's
+  `status.im` nodes) but the same cluster, so pinning would not fix it — and cannot be done anyway:
+  `chat_module` hardcodes `createNode` and `delivery_module` has no entry-node override.
+- **Not the ciphersuite.** Shipped Android patches `CIPHER_SUITE` back to MLS_128; chat_module
+  0.2.2's libchat (`5c55c2ee`) is also MLS_128. They agree.
+
+Remaining: a **GroupV1 (Android fork, #103) vs GroupV2/DirectV1 (chat_module 0.2.2)** conversation
+-semantics gap. Tracked in issue #59, with the next diagnostic step written down there.
 
 ### Fleet discipline
 

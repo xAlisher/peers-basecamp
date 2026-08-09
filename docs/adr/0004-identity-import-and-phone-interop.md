@@ -1,6 +1,6 @@
 # ADR 0004 — Identity import and Peers-Android interop are upstream-constrained
 
-- **Status:** Accepted (constraint recorded; work re-scoped, not abandoned)
+- **Status:** Accepted — **mechanism now identified, 2026-08-09** (see Verification)
 - **Date:** 2026-08-09
 - **Decision owner:** autonomous build agent (unattended run)
 - **Supersedes assumptions in:** the build plan's §IDENTITY and §CROSS-CLIENT PHONE INTEROP
@@ -90,3 +90,41 @@ it must not gate unrelated work.**
 - `rust-lib/Cargo.toml` — libchat rev `5c55c2ee`; `logos-account` `TestLogosAccount` with `dev` feature.
 - Peers Android `SECURITY.md:61`, `HANDOFF.md:395` — patched fork lineage.
 - `android/app/src/main/jniLibs/arm64-v8a/{liblogoschat.so,liblogosdelivery.so}` — arm64 only.
+
+
+## Verification (2026-08-09) — the mechanism, and what it is not
+
+Attempting to add the desktop client's address on Peers Android 0.9.9 fails immediately:
+
+```
+create_conversation failed: generic: The capabilities of the add proposal are
+insufficient for this group.
+```
+
+Two plausible causes were checked and **ruled out**:
+
+**Not the delivery network.** Both clients are on Waku **cluster 2**, all 8 shards, and the same
+chat content-topic namespace `/kym/1/<addr>/proto` — confirmed from the running Basecamp instance's
+own delivery log. They bootstrap through different entry nodes (Android pins `msg.logos.live`;
+Basecamp's `logos.test` preset bakes in the six `status.im` fleet nodes), but `msg.logos.live` is a
+cluster-2 node that peer-exchanges into the rest of the cluster. Pinning Basecamp to the same node
+would not fix this, and is not currently possible anyway: `chat_module` 0.2.2 hardcodes its
+`createNode` config and `delivery_module` exposes no entry-node override.
+
+**Not the ciphersuite.** The XWING flip was the obvious suspect, since our Android fork deliberately
+deferred it. Checked against both libchat revs directly: `462a4884` (the fork's upstream base) is
+XWING, but the **shipped Android build patches the const back to MLS_128**, and `5c55c2ee`
+(chat_module 0.2.2) is **also MLS_128** — upstream itself reverted, *"Downgraded from
+MLS_256_XWING… until demls accepts an external provider"*. Both sides agree.
+
+**What remains** is a conversation-semantics gap between the two libchat generations:
+`chat_module` 0.2.2 is written against **GroupV2 / DirectV1** (stated in its own `Cargo.toml`),
+while the Android fork defaults to **GroupV1** (#103). A 1:1 is an MLS group underneath, so a
+mismatch in which class is created — and what that class requires — produces exactly this
+add-proposal rejection.
+
+The specific capability has **not** been isolated; that is the next step, tracked in issue #59.
+
+This does not change the decision above. It sharpens it: interop is blocked by the libchat
+generation, not by anything configurable, and every other layer (network, topics, ciphersuite,
+storage, and the whole desktop feature set) is verified working.
