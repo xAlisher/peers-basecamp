@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Controls
 import "Theme.js" as Theme
 
 //
@@ -32,6 +33,9 @@ Rectangle {
 
     // "chats" | "contacts" | "settings"
     property string section: "chats"
+
+    // ChatStatus.Online == 2 in the .rep enum.
+    readonly property bool online: backend !== null && backend.chatStatus === 2
 
     // Parsed once per change rather than on every delegate binding.
     property var conversations: []
@@ -163,10 +167,32 @@ Rectangle {
                             font.pixelSize: Theme.brandSize
                             font.weight: Font.Bold
                         }
+                        // New chat. Disabled until the core is Online — a
+                        // create_conversation before then fails on the key-package
+                        // fetch, and a button that silently does nothing is worse
+                        // than one that says it isn't ready.
+                        Rectangle {
+                            width: 28; height: 28
+                            radius: Theme.radiusCard
+                            visible: root.section === "chats"
+                            color: newChatHover.hovered && root.online
+                                   ? Theme.accentHover
+                                   : (root.online ? Theme.accent : Theme.panel)
+                            HoverHandler { id: newChatHover }
+                            TapHandler {
+                                enabled: root.online
+                                onTapped: newChatDialog.open()
+                            }
+                            PeersIcon {
+                                anchors.centerIn: parent
+                                name: "plus"
+                                size: 16
+                                color: root.online ? Theme.onAccent : Theme.textFaint
+                            }
+                        }
                         Rectangle {
                             width: 8; height: 8; radius: 4
-                            color: root.backend && root.backend.chatStatus === 2
-                                   ? Theme.accent : Theme.pulse
+                            color: root.online ? Theme.accent : Theme.pulse
                         }
                     }
                 }
@@ -308,6 +334,126 @@ Rectangle {
                 }
             }
         }
+    }
+
+    // ── new chat ────────────────────────────────────────────────────────────
+    // An in-tree overlay, not a Modal — a Modal is a separate window and brings
+    // its own input problems; this is simpler and screenshot-friendly.
+    Rectangle {
+        id: newChatDialog
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, 0.6)
+        visible: false
+
+        function open()  { addressField.text = ""; visible = true; addressField.forceActiveFocus(); }
+        function close() { visible = false; }
+
+        // Swallow clicks so they don't reach the panels behind.
+        TapHandler { onTapped: newChatDialog.close() }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 460
+            implicitHeight: dialogCol.implicitHeight + Theme.space6 * 2
+            height: implicitHeight
+            radius: Theme.radiusCard
+            color: Theme.panel
+            border.width: Theme.hairline
+            border.color: Theme.border
+
+            // Don't let a click inside the card dismiss it.
+            TapHandler { onTapped: {} }
+
+            ColumnLayout {
+                id: dialogCol
+                anchors.fill: parent
+                anchors.margins: Theme.space6
+                spacing: Theme.space3
+
+                Text {
+                    text: "New conversation"
+                    color: Theme.text
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.titleSize
+                    font.weight: Font.Medium
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: "Paste the peer's address. They must be online at least once for their key package to be published."
+                    color: Theme.textDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.labelSize
+                    wrapMode: Text.Wrap
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 40
+                    radius: Theme.radiusCard
+                    color: Theme.pane
+                    border.width: Theme.hairline
+                    border.color: addressField.activeFocus ? Theme.accent : Theme.border
+
+                    TextField {
+                        id: addressField
+                        anchors.fill: parent
+                        anchors.leftMargin: Theme.space3
+                        anchors.rightMargin: Theme.space3
+                        placeholderText: "Peer address"
+                        placeholderTextColor: Theme.textFaint
+                        color: Theme.text
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.codeSize
+                        background: null
+                        // Never `onAccepted` — on a LogosTextField that hard-crashes
+                        // the QML load, so Keys is the habit everywhere.
+                        Keys.onReturnPressed: function (event) { event.accepted = true; startChat(); }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.space2
+                    Item { Layout.fillWidth: true }
+                    Rectangle {
+                        width: 90; height: 34; radius: Theme.radiusCard
+                        color: "transparent"
+                        border.width: Theme.hairline
+                        border.color: Theme.border
+                        Text {
+                            anchors.centerIn: parent; text: "Cancel"
+                            color: Theme.textDim
+                            font.family: Theme.fontFamily; font.pixelSize: Theme.labelSize
+                        }
+                        TapHandler { onTapped: newChatDialog.close() }
+                    }
+                    Rectangle {
+                        width: 90; height: 34; radius: Theme.radiusCard
+                        color: addressField.text.trim().length > 0 ? Theme.accent : Theme.pane
+                        Text {
+                            anchors.centerIn: parent; text: "Start"
+                            color: addressField.text.trim().length > 0
+                                   ? Theme.onAccent : Theme.textFaint
+                            font.family: Theme.fontFamily; font.pixelSize: Theme.labelSize
+                        }
+                        TapHandler {
+                            enabled: addressField.text.trim().length > 0
+                            onTapped: startChat()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    function startChat() {
+        const addr = addressField.text.trim();
+        if (addr.length === 0 || !backend)
+            return;
+        logos.watch(backend.createConversation(addr),
+                    function () {},
+                    function (err) { errorStrip.show(String(err)); });
+        newChatDialog.close();
     }
 
     // ── error strip ─────────────────────────────────────────────────────────
