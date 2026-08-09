@@ -86,6 +86,29 @@ QString encodePin(bool add, const QString& targetKey);
 // addr1:<address> — a shared contact card.
 QString encodeContactCard(const QString& address, const QString& label);
 
+// img1:<mime>:<w>:<h><base64> — an inline photo.
+//
+// Peers uses this for small images and the hosted `store2:` ref for large ones.
+// We have no storage-module dependency yet, so this client only speaks inline
+// and refuses anything over the cap rather than emitting a message the network
+// will drop (see kMaxInlineBytes).
+QString encodeInlinePhoto(const QString& mime, int width, int height,
+                          const QByteArray& bytes);
+
+// voc1:<mime>:<durMs>:<wf,csv><base64> — an inline voice note.
+QString encodeVoiceNote(const QString& mime, int durationMs,
+                        const QList<int>& waveform, const QByteArray& bytes);
+
+// The largest payload we will put inline, in raw bytes before base64.
+// Beyond this a message is not worth sending: it will not survive the transport.
+int maxInlineBytes();
+
+// Read the pixel dimensions out of a PNG or JPEG header. Returns false when the
+// format isn't recognised, in which case the caller should send 0x0 and let the
+// view use the image's natural size. Deliberately byte-level so the module does
+// not need a QtGui dependency for one number.
+bool imageSize(const QByteArray& bytes, int* width, int* height);
+
 // The marker class of a raw body, without decoding it.
 Kind classify(const QString& raw);
 

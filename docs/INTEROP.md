@@ -62,7 +62,7 @@ Status: `—` not yet run · `✅` passed with evidence · `❌` failed · `⚠�
 | **Group: create** | ✅ pass | shared name renders on both sides — `10-bob-group-created.png`, `11-alice-joined-group.png` |
 | **Group: add member** | ✅ pass | alice joins; bob's roster reaches 2 committed |
 | **Group: messages both ways** | ✅ pass | `12-alice-group-message.png`, `13-bob-group-roundtrip.png` |
-| Photo, both directions | — | |
+| **Photo (inline)** | ✅ pass | bob → alice, rendered from a data URI — `30-bob-sent-photo.png`, `31-alice-received-photo.png` |
 | GIF, both directions | — | |
 | Video, both directions | — | |
 | Voice note, both directions | — | |

@@ -762,10 +762,57 @@ void PeersUiBackend::copyToClipboard(QString text)
     // The clipboard belongs to the view process; QML copies directly.
     reportUnimplemented(QStringLiteral("clipboard from the backend (QML copies directly)"));
 }
-void PeersUiBackend::sendMedia(QString a, QString b, QString c)
+void PeersUiBackend::sendMedia(QString conversationId, QString localPath, QString kind)
 {
-    Q_UNUSED(a) Q_UNUSED(b) Q_UNUSED(c)
-    reportUnimplemented(QStringLiteral("sending media"));
+    if (conversationId.isEmpty() || localPath.isEmpty())
+        return;
+
+    // A plain filesystem path, never a file:// URL — QML must convert with
+    // url.toLocalFile() before calling this.
+    QFileInfo info(localPath);
+    if (!info.exists() || !info.isFile()) {
+        report(QStringLiteral("That file does not exist: %1").arg(info.fileName()));
+        return;
+    }
+
+    // Check the size BEFORE reading, so a huge file never lands in memory.
+    if (info.size() > ContentMarkers::maxInlineBytes()) {
+        report(QStringLiteral("%1 is too large to send (%2 KB; the limit is %3 KB). "
+                              "Hosted media is not wired up yet.")
+                   .arg(info.fileName())
+                   .arg(info.size() / 1024)
+                   .arg(ContentMarkers::maxInlineBytes() / 1024));
+        return;
+    }
+
+    QFile f(localPath);
+    if (!f.open(QIODevice::ReadOnly)) {
+        report(QStringLiteral("Could not read %1").arg(info.fileName()));
+        return;
+    }
+    const QByteArray bytes = f.readAll();
+    f.close();
+
+    const QString suffix = info.suffix().toLower();
+    QString mime = QStringLiteral("image/png");
+    if (suffix == QLatin1String("jpg") || suffix == QLatin1String("jpeg"))
+        mime = QStringLiteral("image/jpeg");
+    else if (suffix == QLatin1String("gif"))
+        mime = QStringLiteral("image/gif");
+    else if (suffix == QLatin1String("webp"))
+        mime = QStringLiteral("image/webp");
+
+    if (kind == QLatin1String("voice")) {
+        // Duration and waveform are the recorder's to supply; sending zeros is
+        // honest about not having them rather than inventing a shape.
+        sendMessage(conversationId,
+                    ContentMarkers::encodeVoiceNote(QStringLiteral("audio/mp4"), 0, {}, bytes));
+        return;
+    }
+
+    int w = 0, h = 0;
+    ContentMarkers::imageSize(bytes, &w, &h);   // 0x0 is fine — the view uses the natural size
+    sendMessage(conversationId, ContentMarkers::encodeInlinePhoto(mime, w, h, bytes));
 }
 void PeersUiBackend::saveMedia(QString a, QString b)
 {

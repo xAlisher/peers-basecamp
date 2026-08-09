@@ -18,6 +18,11 @@ constexpr int kMaxBody = 1 << 20;      // 1 MiB — far above any real text body
 constexpr int kMaxHeaderFields = 8;
 constexpr int kMaxLabelLen = 256;
 constexpr int kMaxKeyLen = 64;
+// The largest raw payload we will put inline. Base64 inflates by ~4/3, and the
+// whole thing has to survive an MLS message over the delivery network, so this
+// is deliberately conservative — refusing is better than emitting a message the
+// transport silently drops.
+constexpr int kMaxInlineBytes = 256 * 1024;
 
 struct MarkerDef {
     const char* prefix;
@@ -209,7 +214,17 @@ QJsonObject decodeToJson(const QString& raw)
         o.insert(QStringLiteral("mime"), fields.value(0));
         o.insert(QStringLiteral("width"), fields.value(1).toInt());
         o.insert(QStringLiteral("height"), fields.value(2).toInt());
-        o.insert(QStringLiteral("hasData"), !afterUS(payload).isEmpty());
+        const QString data = afterUS(payload);
+        o.insert(QStringLiteral("hasData"), !data.isEmpty());
+        // Hand QML a data: URI so an Image can render it directly. Bounded, and
+        // the mime is echoed from the wire — so restrict it to image types
+        // rather than letting a peer choose an arbitrary URI scheme payload.
+        const QString mime = fields.value(0);
+        if (!data.isEmpty() && data.size() <= (kMaxInlineBytes * 4) / 3 + 8
+            && mime.startsWith(QLatin1String("image/"))) {
+            o.insert(QStringLiteral("dataUri"),
+                     QStringLiteral("data:%1;base64,%2").arg(mime, data));
+        }
         o.insert(QStringLiteral("text"), QStringLiteral("📷 Photo"));
         break;
     }
@@ -374,6 +389,87 @@ QString encodeContactCard(const QString& address, const QString& label)
         return QStringLiteral("addr1:%1").arg(address);
     return QStringLiteral("addr1:peers:%1?label=%2")
         .arg(address, QString::fromUtf8(QUrl::toPercentEncoding(clampLabel(label))));
+}
+
+int maxInlineBytes() { return kMaxInlineBytes; }
+
+QString encodeInlinePhoto(const QString& mime, int width, int height, const QByteArray& bytes)
+{
+    return QStringLiteral("img1:%1:%2:%3%4%5")
+        .arg(mime.isEmpty() ? QStringLiteral("image/png") : mime)
+        .arg(width)
+        .arg(height)
+        .arg(kUS)
+        .arg(QString::fromLatin1(bytes.toBase64()));
+}
+
+QString encodeVoiceNote(const QString& mime, int durationMs, const QList<int>& waveform,
+                        const QByteArray& bytes)
+{
+    QStringList wf;
+    // Bound the waveform on the way out too — it drives a repeater on the peer.
+    for (int i = 0; i < waveform.size() && i < 256; ++i)
+        wf << QString::number(waveform.at(i));
+    return QStringLiteral("voc1:%1:%2:%3%4%5")
+        .arg(mime.isEmpty() ? QStringLiteral("audio/mp4") : mime)
+        .arg(durationMs)
+        .arg(wf.join(QLatin1Char(',')), QString(kUS))
+        .arg(QString::fromLatin1(bytes.toBase64()));
+}
+
+bool imageSize(const QByteArray& b, int* width, int* height)
+{
+    if (!width || !height)
+        return false;
+
+    auto be32 = [&](int i) {
+        return (static_cast<quint32>(static_cast<quint8>(b[i])) << 24)
+            | (static_cast<quint32>(static_cast<quint8>(b[i + 1])) << 16)
+            | (static_cast<quint32>(static_cast<quint8>(b[i + 2])) << 8)
+            | static_cast<quint32>(static_cast<quint8>(b[i + 3]));
+    };
+
+    // PNG: 8-byte signature, then an IHDR chunk whose width/height are the two
+    // big-endian u32s at offsets 16 and 20.
+    static const char kPng[] = "\x89PNG\r\n\x1a\n";
+    if (b.size() >= 24 && b.startsWith(QByteArray(kPng, 8))) {
+        *width = static_cast<int>(be32(16));
+        *height = static_cast<int>(be32(20));
+        return *width > 0 && *height > 0;
+    }
+
+    // JPEG: walk the marker segments to a Start Of Frame, which carries the
+    // dimensions. Every read is bounds-checked — this parses attacker-supplied
+    // bytes.
+    if (b.size() >= 4 && static_cast<quint8>(b[0]) == 0xFF && static_cast<quint8>(b[1]) == 0xD8) {
+        int i = 2;
+        while (i + 9 < b.size()) {
+            if (static_cast<quint8>(b[i]) != 0xFF) {
+                ++i;
+                continue;
+            }
+            const quint8 marker = static_cast<quint8>(b[i + 1]);
+            // Standalone markers carry no length.
+            if (marker == 0xD8 || marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7)) {
+                i += 2;
+                continue;
+            }
+            const int len = (static_cast<quint8>(b[i + 2]) << 8) | static_cast<quint8>(b[i + 3]);
+            if (len < 2)
+                return false;
+            // SOF0..SOF15, excluding the non-frame markers DHT/JPG/DAC.
+            if (marker >= 0xC0 && marker <= 0xCF && marker != 0xC4 && marker != 0xC8
+                && marker != 0xCC) {
+                if (i + 9 >= b.size())
+                    return false;
+                *height = (static_cast<quint8>(b[i + 5]) << 8) | static_cast<quint8>(b[i + 6]);
+                *width = (static_cast<quint8>(b[i + 7]) << 8) | static_cast<quint8>(b[i + 8]);
+                return *width > 0 && *height > 0;
+            }
+            i += 2 + len;
+        }
+    }
+    return false;
 }
 
 QString previewText(const QString& raw)

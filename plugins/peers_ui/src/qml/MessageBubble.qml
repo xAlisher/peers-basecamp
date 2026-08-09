@@ -110,8 +110,28 @@ Item {
                     }
                 }
 
+                // Inline photo. The backend hands over a bounded data: URI, so
+                // nothing here touches the filesystem or the network.
+                Image {
+                    id: photo
+                    visible: root.kind === "photo" && source !== ""
+                    source: root.msg.dataUri !== undefined ? root.msg.dataUri : ""
+                    Layout.preferredWidth: Math.min(implicitWidth, 320)
+                    Layout.preferredHeight: implicitWidth > 0
+                                            ? Layout.preferredWidth * (implicitHeight / implicitWidth)
+                                            : 0
+                    fillMode: Image.PreserveAspectFit
+                    asynchronous: true
+                    // A peer-supplied image must not be able to blow up memory
+                    // through its declared dimensions.
+                    sourceSize.width: 640
+                }
+
                 Text {
                     Layout.fillWidth: true
+                    // A photo's caption is its text; with no caption the label
+                    // would just repeat the picture.
+                    visible: !(root.kind === "photo" && photo.visible)
                     text: root.msg.text !== undefined ? root.msg.text : ""
                     color: root.own ? Theme.bubbleOwnText : Theme.bubblePeerText
                     font.family: Theme.fontFamily

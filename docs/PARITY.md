@@ -70,8 +70,8 @@ Android ground truth: `docs/FEATURE-INVENTORY.md` (extracted from source with `p
 | Feature | Android | Basecamp | Notes |
 |---|---|---|---|
 | Content-marker codec | yes | `wip` | Decode for every marker + encode for reply/reaction/pin/contact-card, verified cross-device. Media encode and malformed-input unit tests still open |
-| Photo, inline (`img1:` wire / `img1v:` local row) | yes | `todo` | |
-| Hosted media (`store2:` current, `store1:` legacy) | yes | `todo` | Every current Android send emits `store2:` |
+| Photo, inline (`img1:` wire / `img1v:` local row) | yes | `done` | Sent, decoded and rendered on the peer; PNG/JPEG dimensions read from the header (no QtGui) — `tests/media.mjs`, screenshots 30/31 |
+| Hosted media (`store2:` current, `store1:` legacy) | yes | `todo` | Decode only. Needs a storage-module dependency; until then anything over 256 KB is **refused with a clear message** rather than silently dropped |
 | GIF | yes | `todo` | Rides the hosted-media marker |
 | Video | yes | `todo` | Rides the hosted-media marker |
 | Voice notes, 2:00 cap (`voc1:` wire / `voc1v:` local row) | yes | `todo` | `MAX_RECORDING_MS = 120000` |
