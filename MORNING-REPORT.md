@@ -1,119 +1,83 @@
-# Morning report — Peers for Basecamp, overnight autonomous run
+# Status — Peers for Basecamp
 
-**Date:** 2026-08-09 · **Repo:** https://github.com/xAlisher/peers-basecamp (public)
-
----
-
-## The short version
-
-The foundation is built and the platform path is **proven end to end**. One hard blocker remains:
-**the QML view does not load** — see [`HALT.md`](HALT.md), which contains a clean bisect and an
-exact, mechanical next step.
-
-The run also found that **the build plan's core architectural premise was out of date**, and
-corrected it. That is the most important thing in this report.
+**Repo:** https://github.com/xAlisher/peers-basecamp (public) · **Updated:** 2026-08-09
 
 ---
 
-## What the plan got wrong (and what is true instead)
+## Where it stands
 
-The plan specified riding `chat_module` via a **C FFI** (`chat_new`, `chat_send_message`,
-`chat_create_intro_bundle`, …) and flagged building `liblogoschat` as *"the one real porting
-risk"*. That API only exists in the stale local ref clone (`~/basecamp/refs/logos-chat-module`,
-pinned June 17).
+**The module works.** It builds, installs, loads, renders in the Peers design language, and two
+instances exchange real end-to-end-encrypted traffic over the live `logos.test` fleet — 1:1 and
+group messages, replies, reactions, pins, and inline photos, each verified by observing the **peer**,
+not our own optimistic state.
 
-**Upstream rewrote the module in Rust.** `chat_module` is now v0.2.2, `interface: cdylib`, with a
-**lidl** IDL contract and a `delivery_module` dependency. The named C functions do not exist. There
-is also a maintained canonical consumer — `logos-chat-ui` v0.2.2 — which is exactly the module
-shape this project needs.
+Six live gates, all green:
 
-Consequences, all recorded as ADRs:
-
-| | |
+| Gate | What it proves |
 |---|---|
-| **[ADR 0001](docs/adr/0001-ride-upstream-chat-module-0-2-2.md)** | Ride upstream v0.2.2; model on `logos-chat-ui`. **The liblogoschat porting risk is moot** — the whole chain builds from the Logos cache, exit 0. |
-| **[ADR 0002](docs/adr/0002-rich-content-rides-the-message-body.md)** | The contract carries **text only** — no attachment, reaction, reply or pin primitives. Rich content rides marker-prefixed payloads in the body, reusing Android's grammar. |
-| **[ADR 0003](docs/adr/0003-two-instance-desktop-interop-is-the-primary-gate.md)** | **The port-60000 claim is false** for `delivery_module` v0.2.0. Two local instances coexist — verified. |
-| **[ADR 0004](docs/adr/0004-identity-import-and-phone-interop.md)** | **`chat_module` 0.2.2 has no identity-import method.** "A backup opens the same address on desktop" is **not achievable** and is reported as blocked, not quietly dropped. |
-| **[ADR 0005](docs/adr/0005-three-panel-layout-and-peers-skin.md)** | Three-panel layout; Peers parity beats the Logos DS; avoid `MultiEffect` so screenshots stay trustworthy. |
-| **ADR 0006** (in the `.rep` header) | List data crosses as JSON, not QtRO-remoted models. |
+| `tests/ui-tour.mjs` | every panel renders (chats, contacts, settings, dialogs) |
+| `tests/exchange.mjs` | 1:1 bidirectional round-trip between two instances |
+| `tests/group.mjs` | group create, invite (incl. the **pending** window), messages both ways |
+| `tests/interactions.mjs` | reply, reaction, pin, unpin — all rendering on the peer |
+| `tests/media.mjs` | inline photo sent, decoded and rendered; oversize refused |
+| `tests/backup.mjs` | a **Node-written** `.peersenc` decrypted by our C++ reader |
+
+Plus offline gates in `scripts/check-all.sh`: identicon equivalence (8,026 pairs against the real
+Android implementation), the parity matrix, and two build-trap guards.
+
+Run everything: `./scripts/run-all-scenarios.sh`
 
 ---
 
-## Verified, with evidence
+## The architecture correction that shaped everything
 
-**The stack works.** Using upstream's own harness, two local instances completed a real
-bidirectional end-to-end-encrypted round-trip over the live `logos.test` fleet — Bob sent, Alice
-received and replied, Bob got the reply. Five screenshots in
-[`docs/screenshots/interop-desktop/`](docs/screenshots/interop-desktop/).
+The build plan specified riding `chat_module` through a **C FFI** and called building
+`liblogoschat` "the one real porting risk". That API exists only in the stale June ref clone.
+**Upstream rewrote the module in Rust** — v0.2.2, `interface: cdylib`, a **lidl** contract. The
+porting risk was moot; the real constraints were different ones:
 
-**Our module builds and packages correctly.** `nix build .#lgx-portable` → exit 0,
-`manifestVersion: 0.3.0` (the plan's gate), variant `linux-amd64`, deps `[chat_module,
-delivery_module]`, icon bundled.
-
-**The identicon is proven, not assumed.** `tests/identicon-equivalence.mjs` lifts the real
-`identiconCells` out of `HexAvatar.tsx` **at run time** and diffs it against our QML port over
-**8,026 (seed, kind) pairs**, plus symmetry, determinism, range and prefix invariants. Lifting
-rather than copying means an upstream algorithm change fails the test instead of drifting silently.
-
-**The parity checker works in both directions.** `scripts/check-parity.sh` passes on the real
-matrix and exits 1 on a bad status — it caught six genuinely missing marker rows on first run.
+| ADR | |
+|---|---|
+| [0001](docs/adr/0001-ride-upstream-chat-module-0-2-2.md) | Ride upstream v0.2.2; model on `logos-chat-ui` 0.2.2 |
+| [0002](docs/adr/0002-rich-content-rides-the-message-body.md) | The contract is **text only** — media, reactions, replies and pins ride markers in the body |
+| [0003](docs/adr/0003-two-instance-desktop-interop-is-the-primary-gate.md) | Two local instances **do** coexist; the plan's port-60000 claim is false |
+| [0004](docs/adr/0004-identity-import-and-phone-interop.md) | **No identity-import method exists** — "same address from a backup" is not achievable |
+| [0005](docs/adr/0005-three-panel-layout-and-peers-skin.md) | Three panels; Peers parity beats the Logos DS; no `MultiEffect` |
+| 0006 (in the `.rep`) | List data crosses as JSON, not remoted models |
 
 ---
 
-## Delivered
+## Not done
 
-- **Repo + backlog**: 7 epics and 48 issues, each with acceptance criteria.
-- **Ground truth** (~4,400 lines), extracted from Android source with `path:line` citations and
-  then **adversarially verified** by a second pass that caught invented values, wrong citations and
-  omissions: `DESIGN-SPEC`, `HEXAVATAR`, `ICONS`, `BACKUP-FORMAT`, `CONTENT-MARKERS`,
-  `FEATURE-INVENTORY`.
-- **Module**: flake pinned lockstep (chat_module v0.2.2 / delivery_module v0.2.0 / builder 0.2.6),
-  metadata, `.rep` contract covering the full feature surface, and a C++ backend implementing the
-  messaging spine — conversations, messages, groups, roster, identity, drafts, settings, health
-  probe — with both platform invariants observed (defer module reads out of event callbacks;
-  subscribe before snapshotting).
-- **Content-marker codec**: decode implemented for every documented marker, written as a security
-  boundary (bounded fields, no peer-driven allocation, hex-only addresses, graceful degradation for
-  unknown markers).
-- **QML**: `Theme` singleton from the real tokens, `HexAvatar`, vector-path Lucide icons,
-  `MessageBubble`, `ConversationRow`, `Composer`, `EmptyState`, three-panel shell, and an app icon
-  generated by the identicon algorithm itself.
-- **Docs**: `PROJECT_KNOWLEDGE.md`, `PARITY.md` + drift checker, `INTEROP.md`, `HALT.md`.
+- **Voice notes, video, GIF** — the codec handles them; capture/playback is not built.
+- **Hosted media (`store2:`)** — needs a storage-module dependency. Until then anything over 256 KB
+  is **refused with a message naming the size and limit**, not silently dropped.
+- **QR** — the address card shows an honest placeholder. No encoder, and no scanner. A wrong QR
+  would send messages to the wrong identity, so a fake one is worse than none.
+- **PIN app-lock, duress PIN, lock screen, reset** — rendered as disabled with "not available yet"
+  rather than controls that do nothing.
+- **Forward, copy, delete-for-me** — not wired.
+- **Leaving a group remotely** — `chat_module` 0.2.2 has **no leave primitive**; only a local
+  delete. Presented as local, not as "the group was told".
+- **Adopting a backup's identity** — upstream-blocked (ADR 0004). Decryption, schema parsing and
+  the reporting all work.
+- **Phone interop** — not attempted. `docs/INTEROP.md` holds the matrix and the fleet discipline.
+
+`docs/PARITY.md` is the authoritative per-feature list and is checked by a script.
 
 ---
 
-## Not delivered, and why
+## Things worth knowing before you touch it
 
-**The done-criteria are not met.** Stated plainly:
+- **The join step is genuinely flaky.** Across many runs it lands first try most of the time, needs
+  a retry sometimes, and fails outright occasionally. The harness retries, and exit code **2** means
+  "the network did not deliver", distinct from **1**, "an assertion failed". Re-run before digging.
+- **`qml/qmldir` is builder-owned.** Shipping your own breaks the plugin load with a misleading
+  `capability_module` SIGSEGV. So does an **untracked** source file, since the flake's `src` is a
+  git source. Both are now guarded in `scripts/check-all.sh`; both cost real time first.
+- **Killing the `nix run` wrapper leaves the app alive** holding the inspector ports, so a rebuild
+  silently tests the *old* binary. `run-exchange.sh` preflights the ports and aborts rather than
+  lying to you.
 
-1. **The view does not load** → every UI epic is unverified. `HALT.md` has the bisect and next step.
-2. **No epic is closed.** Nothing was marked done that was not observed working — no issue was
-   closed on the strength of code alone.
-3. **Media, reactions, replies, pins, voice notes, QR, PIN, duress PIN, backup read/write** are
-   scaffolded in the contract but not implemented. Every one of these reports honestly
-   ("Not available yet: …") rather than failing silently.
-4. **Phone interop was not attempted.** It was gated behind a working desktop client, which did not
-   arrive. `docs/INTEROP.md` holds the matrix and the fleet discipline for when it does.
-5. **Same-address backup import is upstream-blocked** (ADR 0004) and will not be met without an
-   upstream change.
-
-Two smaller notes:
-
-- **The join step is flaky against the live fleet.** The first exchange run failed with
-  `timed out waiting for alice joins conversation`; the second passed unchanged. Our harness must
-  retry and distinguish "invite did not land" from "assertion failed", or a green suite will go red
-  at random and teach everyone to ignore it.
-- **Commits are trailed `Co-Authored-By: Claude Opus 5 (1M context)`**, not the `Opus 4.8` the plan
-  specified — the plan's string would have been inaccurate.
-
----
-
-## Recommended order for the next session
-
-1. Work `HALT.md` / [#57](https://github.com/xAlisher/peers-basecamp/issues/57) — it is mechanical and unblocks all seven UI epics.
-2. Screenshot-verify the shell against the Peers reference; close E7.
-3. Marker **encode** + reply/reaction/pin, which are pure additions to a codec that already decodes.
-4. Stand up the two-instance harness as a script (with join retry) and start filling
-   `docs/INTEROP.md`.
-5. File the upstream identity-import request so ADR 0004 can eventually be retired.
+The failure that dominated the first half of this build, and what I'd change, is written up in
+[`fails/`](fails/).
