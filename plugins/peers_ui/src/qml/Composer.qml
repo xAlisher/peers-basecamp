@@ -110,7 +110,11 @@ Rectangle {
         Rectangle {
             Layout.alignment: Qt.AlignVCenter
             visible: !root.recording
-            width: visible ? 36 : 0; height: 36; radius: 18
+            Layout.preferredWidth: 36
+            Layout.preferredHeight: 36
+            implicitWidth: 36
+            implicitHeight: 36
+            radius: 18
             color: attachHover.hovered ? Theme.panel : "transparent"
             HoverHandler { id: attachHover }
             TapHandler { onTapped: root.attach() }
@@ -121,7 +125,11 @@ Rectangle {
         Rectangle {
             Layout.alignment: Qt.AlignVCenter
             visible: !root.recording
-            width: visible ? 36 : 0; height: 36; radius: 18
+            Layout.preferredWidth: 36
+            Layout.preferredHeight: 36
+            implicitWidth: 36
+            implicitHeight: 36
+            radius: 18
             color: locHover.hovered ? Theme.panel : "transparent"
             HoverHandler { id: locHover }
             TapHandler { onTapped: root.shareLocation() }
@@ -134,7 +142,11 @@ Rectangle {
         Rectangle {
             Layout.alignment: Qt.AlignVCenter
             visible: root.recording
-            width: visible ? 36 : 0; height: 36; radius: 18
+            Layout.preferredWidth: 36
+            Layout.preferredHeight: 36
+            implicitWidth: 36
+            implicitHeight: 36
+            radius: 18
             color: discardHover.hovered ? Theme.panel : "transparent"
             HoverHandler { id: discardHover }
             TapHandler { onTapped: root.cancelRecord() }
@@ -150,7 +162,11 @@ Rectangle {
 
             Rectangle {
                 Layout.alignment: Qt.AlignVCenter
-                width: 10; height: 10; radius: 5
+                Layout.preferredWidth: 10
+                Layout.preferredHeight: 10
+                implicitWidth: 10
+                implicitHeight: 10
+                radius: 5
                 color: Theme.unread
                 SequentialAnimation on opacity {
                     running: root.recording
@@ -211,9 +227,11 @@ Rectangle {
 
         Rectangle {
             Layout.alignment: Qt.AlignVCenter
-            width: 44
-            height: 44
-            radius: width / 2
+            Layout.preferredWidth: 44
+            Layout.preferredHeight: 44
+            implicitWidth: 44
+            implicitHeight: 44
+            radius: 22
             // Empty input offers the mic, the way Android's composer does; typing
             // turns it back into send. While recording it always sends the take.
             readonly property bool acts: root.canSend || root.recording

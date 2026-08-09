@@ -71,6 +71,9 @@ class PeersUiBackend
     // Draft text for the current conversation, restored on reselect.
     PROP(QString currentDraft="" READONLY)
     // True while a voice note is recording; elapsed ms for the 2:00 cap timer.
+    // The message whose audio is playing right now, "" when nothing is. Lets a
+    // bubble show a stop affordance instead of pretending the click did nothing.
+    PROP(QString playingKey="" READONLY)
     PROP(bool    recording=false READONLY)
     PROP(int     recordingMs=0 READONLY)
 
@@ -136,6 +139,15 @@ class PeersUiBackend
     // loc1:<lat>,<lng>[,<accM>] — a shared location.
     SLOT(void sendLocation(QString conversationId, double lat, double lng))
     SLOT(void saveMedia(QString messageId, QString destPath))
+    // Open a decoded attachment in the desktop's own player/viewer. This CANNOT
+    // be done from QML: Qt.openUrlExternally is silently a no-op inside the
+    // Basecamp QML sandbox (basecamp-skills: qml-sandbox-restrictions), so the
+    // plugin process has to do it.
+    SLOT(void openMedia(QString messageId))
+    // Open an http(s) URL in the desktop browser — same reason as openMedia.
+    // Only http/https are accepted; a peer-supplied string must not be able to
+    // hand an arbitrary scheme to the desktop.
+    SLOT(void openExternal(QString url))
     SLOT(void startRecording())
     SLOT(void cancelRecording())
     SLOT(void sendRecording(QString conversationId))

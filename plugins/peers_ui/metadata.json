@@ -34,7 +34,8 @@
         "zstd",
         "krb5",
         "abseil-cpp",
-        "openssl"
+        "openssl",
+        "ffmpeg"
       ]
     },
     "external_libraries": [],

@@ -21,6 +21,8 @@ Item {
 
     // Briefly outlined after the pinned bar jumps here.
     property bool highlighted: false
+    // True while this message's audio is playing, so the row offers to stop it.
+    property bool playing: false
 
     readonly property bool own: msg.fromSelf === true
     readonly property string kind: msg.kind !== undefined ? msg.kind : "text"
@@ -53,6 +55,10 @@ Item {
     signal imageClicked(string uri, string messageKey)
     // A shared contact card's two actions (AddressCard.tsx): start/open the 1:1
     // with them, or look at the address itself.
+    // Play/open an attachment. Qt.openUrlExternally is a silent no-op in the
+    // Basecamp QML sandbox, so this has to go through the backend.
+    signal openMedia(string messageKey)
+    signal openExternal(string url)
     signal addContact(string address, string label)
     signal viewContact(string address, string label)
 
@@ -197,7 +203,7 @@ Item {
                     visible: root.msg.mime !== undefined
                              && String(root.msg.mime) === "image/gif"
                              && source !== ""
-                    source: root.msg.dataUri !== undefined ? root.msg.dataUri : ""
+                    source: root.msg.imageUri !== undefined ? root.msg.imageUri : ""
                     Layout.preferredWidth: Math.min(implicitWidth, 320)
                     Layout.preferredHeight: implicitWidth > 0
                                             ? Layout.preferredWidth * (implicitHeight / implicitWidth)
@@ -213,7 +219,7 @@ Item {
                     // hosted media only has a source once the fetch completes.
                     visible: (root.kind === "photo" || root.kind === "media")
                              && source !== "" && !gif.visible
-                    source: root.msg.dataUri !== undefined ? root.msg.dataUri : ""
+                    source: root.msg.imageUri !== undefined ? root.msg.imageUri : ""
                     Layout.preferredWidth: Math.min(implicitWidth, 320)
                     Layout.preferredHeight: implicitWidth > 0
                                             ? Layout.preferredWidth * (implicitHeight / implicitWidth)
@@ -374,21 +380,24 @@ Item {
                         anchors.rightMargin: Theme.space2
                         spacing: Theme.space2
                         PeersIcon {
-                            name: "play"; size: 14
+                            name: root.playing ? "close" : "play"
+                            size: 14
                             color: root.own ? Theme.bubbleOwnText : Theme.accent
                         }
                         Text {
                             Layout.fillWidth: true
-                            text: root.kind === "voice"
-                                  ? "Play voice note  ·  " + root.mmss(root.msg.durationMs || 0)
-                                  : "Play video"
+                            text: root.kind !== "voice"
+                                  ? "Play video"
+                                  : (root.playing
+                                     ? "Playing…  ·  tap to stop"
+                                     : "Play voice note  ·  " + root.mmss(root.msg.durationMs || 0))
                             color: root.own ? Theme.bubbleOwnText : Theme.text
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.labelSize
                         }
                     }
                     TapHandler {
-                        onTapped: Qt.openUrlExternally("file://" + root.msg.localPath)
+                        onTapped: root.openMedia(String(root.msg.key || ""))
                     }
                 }
 
@@ -416,7 +425,7 @@ Item {
                         }
                     }
                     TapHandler {
-                        onTapped: Qt.openUrlExternally(
+                        onTapped: root.openExternal(
                             "https://www.openstreetmap.org/?mlat=" + root.msg.lat
                             + "&mlon=" + root.msg.lng + "#map=16/" + root.msg.lat + "/" + root.msg.lng)
                     }

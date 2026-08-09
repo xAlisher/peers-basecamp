@@ -8,6 +8,8 @@
 #include <QTimer>
 #include <QUuid>
 
+#include "MediaTools.h"
+
 #include <cmath>
 
 namespace {
@@ -18,7 +20,10 @@ constexpr int kSampleRate = 16000;
 
 QString findTool(const QString &name)
 {
-    return QStandardPaths::findExecutable(name);
+    // Prefer the copy bundled with this module: inside the AppImage, whatever is
+    // on PATH may not be loadable at all, and a user with no ffmpeg installed
+    // should still be able to record.
+    return MediaTools::resolveBin(name);
 }
 
 // The capture command, in preference order. ffmpeg first because it stops
@@ -155,6 +160,9 @@ bool VoiceRecorder::start(QString *whyNot)
     m_proc->setProgram(cmd.program);
     m_proc->setArguments(cmd.args);
     m_proc->setProcessChannelMode(QProcess::MergedChannels);
+    // A bundled, nix-built recorder must not inherit the AppImage's
+    // LD_LIBRARY_PATH — it would load the host's mismatched libraries and die.
+    m_proc->setProcessEnvironment(MediaTools::cleanSpawnEnv());
     m_proc->start();
     if (!m_proc->waitForStarted(4000)) {
         if (whyNot)
@@ -294,10 +302,11 @@ bool VoiceRecorder::finish(QByteArray *bytes, QString *mime, int *durationMs,
 
     // Transcode to what the phone expects. Without ffmpeg the WAV goes as-is:
     // bigger, but playable, and far better than refusing to send.
-    const QString ff = findTool(QStringLiteral("ffmpeg"));
+    const QString ff = MediaTools::resolveBin(QStringLiteral("ffmpeg"));
     if (!ff.isEmpty()) {
         const QString m4a = wavPath + QStringLiteral(".m4a");
         QProcess enc;
+        enc.setProcessEnvironment(MediaTools::cleanSpawnEnv());
         enc.start(ff,
                   {QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
                    QStringLiteral("error"), QStringLiteral("-i"), wavPath, QStringLiteral("-c:a"),

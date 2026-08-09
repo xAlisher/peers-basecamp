@@ -5,6 +5,14 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 fail=0
 echo "== identicon equivalence =="; node tests/identicon-equivalence.mjs;  [ $? -ne 0 ] && fail=1
+# Our inline-payload markers must parse with Peers Android's OWN parsers. The
+# separator was U+001F for a long time where the phone uses U+241F — desktop
+# ⇄desktop never noticed, and every photo and voice note arrived on the phone as
+# unreadable text.
+echo "== wire format vs Peers Android =="
+node tests/wire-separator.mjs; rc=$?
+[ $rc -eq 2 ] && echo "  (skipped: no Android checkout)"
+[ $rc -eq 1 ] && fail=1
 echo "== parity matrix =="       ; ./scripts/check-parity.sh;              [ $? -ne 0 ] && fail=1
 # The qmldir trap: qml/qmldir is builder-owned. Shipping our own silently breaks
 # the plugin load (see fails/2026-08-09-*.md and the basecamp skill).

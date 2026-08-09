@@ -16,7 +16,12 @@
 
 #include "BackupReader.h"
 #include "StorageClient.h"
+#include "MediaTools.h"
 #include "VoiceRecorder.h"
+
+#include <QProcess>
+#include <QRegularExpression>
+#include <QUrl>
 #include "ContentMarkers.h"
 
 namespace {
@@ -413,13 +418,45 @@ bool PeersUiBackend::loadMessages(const QString& convoId)
             const QString mcap = mf.value(5);
             if (m_mediaPaths.contains(cid)) {
                 row.insert(QStringLiteral("localPath"), m_mediaPaths.value(cid));
-                row.insert(QStringLiteral("dataUri"),
-                           QStringLiteral("file://") + m_mediaPaths.value(cid));
+                row.insert(QStringLiteral("imageUri"),
+                           QUrl::fromLocalFile(m_mediaPaths.value(cid)).toString());
             } else if (!cid.isEmpty()) {
                 const QString c = convoId;
                 deferToEventLoop([this, c, cid, keyB64, mcap, mmime] {
                     fetchHostedMedia(c, cid, keyB64, mcap, mmime);
                 });
+            }
+        }
+
+        // An inline PHOTO arrives as base64 too, and cannot be handed to QML as a
+        // data: URI — the sandbox blocks those, so the Image silently renders
+        // nothing. Write it into the cache once and give the view a file:// URL.
+        if (row.value(QStringLiteral("kind")).toString() == QLatin1String("photo")
+            && row.value(QStringLiteral("hasData")).toBool()) {
+            const QString mime = row.value(QStringLiteral("mime")).toString();
+            const QString cached = m_mediaPaths.value(key);
+            if (!cached.isEmpty() && QFile::exists(cached)) {
+                row.insert(QStringLiteral("localPath"), cached);
+                row.insert(QStringLiteral("imageUri"), QUrl::fromLocalFile(cached).toString());
+            } else if (mime.startsWith(QLatin1String("image/"))) {
+                const QByteArray img = ContentMarkers::inlinePayloadBytes(content);
+                if (!img.isEmpty()) {
+                    QString ext = mime.mid(6);            // image/png -> png
+                    if (ext == QLatin1String("jpeg")) ext = QStringLiteral("jpg");
+                    if (!ext.contains(QRegularExpression(QStringLiteral("^[a-z0-9]{1,5}$"))))
+                        ext = QStringLiteral("img");      // never let the wire pick an extension
+                    const QString path = QDir(MediaTools::mediaCacheDir())
+                                             .filePath(QStringLiteral("photo-%1.%2").arg(key, ext));
+                    QFile out(path);
+                    if (out.open(QIODevice::WriteOnly)) {
+                        out.write(img);
+                        out.close();
+                        m_mediaPaths.insert(key, path);
+                        row.insert(QStringLiteral("localPath"), path);
+                        row.insert(QStringLiteral("imageUri"),
+                                   QUrl::fromLocalFile(path).toString());
+                    }
+                }
             }
         }
 
@@ -439,11 +476,8 @@ bool PeersUiBackend::loadMessages(const QString& convoId)
                         ? QStringLiteral("wav")
                         : (mime.contains(QLatin1String("mpeg")) ? QStringLiteral("mp3")
                                                                 : QStringLiteral("m4a"));
-                    const QString dir =
-                        QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
-                    QDir().mkpath(dir);
-                    const QString path =
-                        QDir(dir).filePath(QStringLiteral("voice-%1.%2").arg(key, ext));
+                    const QString path = QDir(MediaTools::mediaCacheDir())
+                                             .filePath(QStringLiteral("voice-%1.%2").arg(key, ext));
                     QFile out(path);
                     if (out.open(QIODevice::WriteOnly)) {
                         out.write(audio);
@@ -1059,6 +1093,145 @@ void PeersUiBackend::fetchHostedMedia(const QString& convoId, const QString& cid
                                        loadMessages(convoId);
                                });
 }
+void PeersUiBackend::openExternal(QString url)
+{
+    // The map link is built from peer-supplied coordinates, so the scheme is
+    // checked here rather than trusted: handing an arbitrary URL to the desktop
+    // would let a message decide what program runs.
+    const QUrl u(url);
+    if (!u.isValid() || (u.scheme() != QLatin1String("http")
+                         && u.scheme() != QLatin1String("https"))) {
+        report(QStringLiteral("Refusing to open a non-web link."));
+        return;
+    }
+    // Deliberately NOT QDesktopServices: it lives in Qt6::Gui, which this target
+    // does not link, and inside an AppImage it is the less predictable of the
+    // two anyway. xdg-open is what it would have called.
+    const QString exe = MediaTools::resolveBin(QStringLiteral("xdg-open"));
+    if (!exe.isEmpty() && QProcess::startDetached(exe, {u.toString()}))
+        return;
+    report(QStringLiteral("Could not open a browser for that link."));
+}
+
+void PeersUiBackend::stopPlayback()
+{
+    if (m_player) {
+        m_player->kill();
+        m_player->waitForFinished(1500);
+        m_player->deleteLater();
+        m_player = nullptr;
+    }
+    setPlayingKey(QString());
+}
+
+bool PeersUiBackend::playAudio(const QString& path, const QString& key)
+{
+    // ffplay with -nodisp opens NO window: from the user's seat the note simply
+    // plays in the module, which is the point. Handing the file to xdg-open would
+    // launch someone else's application instead.
+    //
+    // This mirrors receiver_ui, the one shipped Basecamp module that plays audio,
+    // down to the SDL backend list — see MediaTools.h for why there is no Qt
+    // Multimedia option here.
+    struct Cand { const char* exe; QStringList args; bool pcmOnly; };
+    const QList<Cand> cands{
+        { "ffplay", { QStringLiteral("-nodisp"), QStringLiteral("-autoexit"),
+                      QStringLiteral("-loglevel"), QStringLiteral("error"), path }, false },
+        { "mpv",    { QStringLiteral("--no-video"), QStringLiteral("--really-quiet"), path }, false },
+        { "paplay", { path }, true },
+        { "aplay",  { QStringLiteral("-q"), path }, true },
+    };
+
+    for (const Cand& c : cands) {
+        const QString exe = MediaTools::resolveBin(QLatin1String(c.exe));
+        if (exe.isEmpty())
+            continue;
+        if (c.pcmOnly && !path.endsWith(QLatin1String(".wav"), Qt::CaseInsensitive))
+            continue;   // these decode nothing
+
+        QProcessEnvironment env = MediaTools::cleanSpawnEnv();
+        // A bundled ffplay is nix-built: its SDL2 must reach the host audio
+        // server without loading glibc-mismatched system audio libraries. Force
+        // the pulse backend (host pulseaudio / pipewire-pulse, protocol-stable)
+        // with alsa behind it — NOT bare "pulse", which fails outright when no
+        // daemon is running. A system ffplay has every backend, so leave it to
+        // auto-detect.
+        if (MediaTools::isBundled(exe))
+            env.insert(QStringLiteral("SDL_AUDIODRIVER"), QStringLiteral("pulse,alsa"));
+
+        m_player = new QProcess(this);
+        m_player->setProcessEnvironment(env);
+        connect(m_player, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+                [this](int, QProcess::ExitStatus) {
+                    // Ended on its own; clear the state so the bubble stops
+                    // offering to stop it.
+                    if (m_player) {
+                        m_player->deleteLater();
+                        m_player = nullptr;
+                    }
+                    setPlayingKey(QString());
+                });
+        m_player->start(exe, c.args);
+        if (!m_player->waitForStarted(3000)) {
+            m_player->deleteLater();
+            m_player = nullptr;
+            continue;
+        }
+        setPlayingKey(key);
+        return true;
+    }
+    return false;
+}
+
+void PeersUiBackend::openMedia(QString messageId)
+{
+    // Playback lives here rather than in QML because Qt.openUrlExternally is a
+    // silent no-op inside the Basecamp QML sandbox — the click appeared to do
+    // nothing at all, which is exactly what a blocked call looks like.
+    if (messageId.isEmpty())
+        return;
+
+    // A second tap on what is playing stops it.
+    if (playingKey() == messageId) {
+        stopPlayback();
+        return;
+    }
+
+    QString path = m_mediaPaths.value(messageId);
+    QString kind;
+    const QString raw = m_rawByKey.value(messageId);
+    if (!raw.isEmpty()) {
+        const QJsonObject o = ContentMarkers::decodeToJson(raw);
+        kind = o.value(QStringLiteral("kind")).toString();
+        if (path.isEmpty() || !QFile::exists(path))
+            path = m_mediaPaths.value(o.value(QStringLiteral("cid")).toString());
+    }
+    if (path.isEmpty() || !QFile::exists(path)) {
+        report(QStringLiteral("That attachment is not downloaded yet."));
+        return;
+    }
+
+    const QJsonObject o = ContentMarkers::decodeToJson(raw);
+    const bool isAudio = kind == QLatin1String("voice")
+        || o.value(QStringLiteral("mime")).toString().startsWith(QLatin1String("audio/"));
+
+    if (isAudio) {
+        stopPlayback();
+        if (playAudio(path, messageId))
+            return;
+        report(QStringLiteral("Could not start audio playback. This module bundles ffplay; if "
+                              "that failed, mpv or paplay on PATH also work."));
+        return;
+    }
+
+    // Video genuinely wants a window, and the host has no surface to give it, so
+    // this one does go to the desktop's player.
+    const QString exe = MediaTools::resolveBin(QStringLiteral("xdg-open"));
+    if (!exe.isEmpty() && QProcess::startDetached(exe, { path }))
+        return;
+    report(QStringLiteral("Nothing on this machine could open %1.").arg(QFileInfo(path).fileName()));
+}
+
 void PeersUiBackend::saveMedia(QString messageId, QString destPath)
 {
     if (messageId.isEmpty() || destPath.isEmpty())
@@ -1083,13 +1256,14 @@ void PeersUiBackend::saveMedia(QString messageId, QString destPath)
         }
         bytes = f.readAll();
     } else if (kind == QLatin1String("photo") || kind == QLatin1String("voice")) {
-        // Inline: the payload sits after the unit separator.
-        const int us = raw.indexOf(QChar(0x001F));
-        if (us < 0) {
+        // Inline: the payload sits after the unit separator. Go through the
+        // shared helper — it accepts BOTH separator forms, so a photo or voice
+        // note from the phone (U+241F) saves as readily as one of ours.
+        bytes = ContentMarkers::inlinePayloadBytes(raw);
+        if (bytes.isEmpty()) {
             report(QStringLiteral("That message carries no data."));
             return;
         }
-        bytes = QByteArray::fromBase64(raw.mid(us + 1).toLatin1());
     } else {
         report(QStringLiteral("There is nothing to save on that message."));
         return;

@@ -155,8 +155,8 @@ async function main() {
   if (got.width !== W || got.height !== H)
     throw new Error(`peer sees wrong dimensions: ${got.width}x${got.height}`);
   if (!got.hasData) throw new Error("peer received the marker but no image data");
-  if (!String(got.dataUri || "").startsWith("data:image/png;base64,"))
-    throw new Error(`peer's dataUri looks wrong: ${String(got.dataUri).slice(0, 60)}`);
+  if (!String(got.imageUri || "").startsWith("file://"))
+    throw new Error(`peer's imageUri is not a local file: ${String(got.imageUri).slice(0, 60)}`);
 
   // The whole point of the codec: a raw marker must never reach the UI.
   const n = await evalq(alice, "root.messages.length");
@@ -164,7 +164,7 @@ async function main() {
     const t = String(await evalq(alice, `root.messages[${i}].text`));
     if (t.includes("img1:")) throw new Error(`raw marker leaked into the thread: ${t.slice(0, 40)}`);
   }
-  step("alice: received the photo, decoded to a data URI, no raw marker");
+  step("alice: received the photo, decoded to a local file, no raw marker");
   await shoot(alice, "31-alice-received-photo.png");
 
   // ── oversize is refused, not silently dropped ───────────────────────────

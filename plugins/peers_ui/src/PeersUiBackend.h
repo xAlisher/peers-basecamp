@@ -12,6 +12,7 @@
 #include "rep_peers_ui_source.h"     // PeersUiBackendSimpleSource (repc from src/peers_ui.rep)
 #include "logos_ui_plugin_context.h" // LogosUiPluginContext: modules() + onContextReady()
 
+class QProcess;
 class QTimer;
 class StorageClient;
 class VoiceRecorder;
@@ -69,6 +70,8 @@ public:
     void sendMedia(QString conversationId, QString localPath, QString kind) override;
     void sendLocation(QString conversationId, double lat, double lng) override;
     void saveMedia(QString messageId, QString destPath) override;
+    void openMedia(QString messageId) override;
+    void openExternal(QString url) override;
     void startRecording() override;
     void cancelRecording() override;
     void sendRecording(QString conversationId) override;
@@ -179,6 +182,13 @@ private:
     StorageClient* m_storage = nullptr;
     // Microphone capture for voice notes. Null until the first record.
     VoiceRecorder* m_recorder = nullptr;
+    // Audio playback. The host bundles no Qt Multimedia (verified against the
+    // running process: Core/Gui/Quick/Widgets are there, Multimedia is not), so
+    // a voice note is played by a HEADLESS player process — no window opens and
+    // no other application is handed the file.
+    QProcess* m_player = nullptr;
+    void stopPlayback();
+    bool playAudio(const QString& path, const QString& key);
     // convoId+cid already being fetched, so a re-render doesn't refetch.
     QSet<QString> m_fetching;
     // cid → local decrypted file, so a fetched blob is handed to the view

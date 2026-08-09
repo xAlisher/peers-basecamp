@@ -24,6 +24,8 @@ logos_module(
         src/StorageClient.cpp
         src/VoiceRecorder.h
         src/VoiceRecorder.cpp
+        src/MediaTools.h
+        src/MediaTools.cpp
     INCLUDE_DIRS
         src
 )

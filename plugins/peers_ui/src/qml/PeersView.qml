@@ -69,8 +69,8 @@ Rectangle {
             const isImage = m.kind === "photo"
                             || (m.kind === "media"
                                 && String(m.mime || "").indexOf("image/") === 0);
-            if (isImage && String(m.dataUri || "") !== "")
-                out.push({ uri: String(m.dataUri), key: String(m.key) });
+            if (isImage && String(m.imageUri || "") !== "")
+                out.push({ uri: String(m.imageUri), key: String(m.key) });
         }
         return out;
     }
@@ -466,6 +466,11 @@ Rectangle {
                         highlighted: root.highlightKey !== ""
                                      && String(modelData.key) === root.highlightKey
                         onImageClicked: function (uri, key) { root.openViewer(uri, key); }
+                        playing: root.backend
+                                 && String(root.backend.playingKey) === String(modelData.key)
+                                 && String(modelData.key) !== ""
+                        onOpenMedia: function (key) { root.call(root.backend.openMedia(key)); }
+                        onOpenExternal: function (u) { root.call(root.backend.openExternal(u)); }
                         onAddContact: function (address, label) {
                             if (label !== "")
                                 root.call(root.backend.setContactLabel(address, label));
@@ -612,9 +617,9 @@ Rectangle {
         }
         onForward: { root.forwardSource = bubbleMenu.msg; forwardPicker.open(); }
         onSaveMedia: { root.saveKey = bubbleMenu.msg.key; saveDialog.open(); }
-        onOpenInMaps: Qt.openUrlExternally(
+        onOpenInMaps: root.call(root.backend.openExternal(
             "https://www.openstreetmap.org/?mlat=" + bubbleMenu.msg.lat
-            + "&mlon=" + bubbleMenu.msg.lng)
+            + "&mlon=" + bubbleMenu.msg.lng))
         onCopyMessage: {
             // Android copies the RAW body here, not the rendered text — which is
             // why a hosted GIF copies its marker. Matching that.

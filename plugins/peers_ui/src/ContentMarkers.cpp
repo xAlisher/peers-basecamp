@@ -9,7 +9,30 @@ namespace ContentMarkers {
 namespace {
 
 // The unit separator Peers uses between a marker's header and its payload.
-constexpr QChar kUS = QChar(0x001F);
+// The separator between a marker's header and its payload.
+//
+// Peers Android uses the PRINTABLE glyph U+241F SYMBOL FOR UNIT SEPARATOR (UTF-8
+// E2 90 9F) — `const SEP = '\u241F'` in voiceMsg.ts, imageMsg.ts, relay.ts and
+// the BLE codecs — NOT the ASCII control character U+001F. They look alike in a
+// description and are different bytes on the wire.
+//
+// We emitted U+001F for a long time, which desktop⇄desktop never noticed because
+// both ends agreed on the wrong byte; the phone's parser simply could not find a
+// separator and fell back to rendering the raw marker as text. So: EMIT U+241F,
+// and ACCEPT either, so history written by an older build still decodes.
+constexpr QChar kUS = QChar(0x241F);
+constexpr QChar kLegacyUS = QChar(0x001F);
+
+// Index of the separator, whichever form it takes. Earliest wins: a payload is
+// base64 or a path and contains neither, so there is no ambiguity to resolve.
+int usIndex(const QString& payload)
+{
+    const int a = payload.indexOf(kUS);
+    const int b = payload.indexOf(kLegacyUS);
+    if (a < 0) return b;
+    if (b < 0) return a;
+    return qMin(a, b);
+}
 
 // Hard bounds. Peer-controlled input never drives an allocation, and a body
 // that exceeds these is rejected rather than truncated into something that
@@ -77,13 +100,13 @@ QString clampLabel(QString s)
 // the whole payload when there is none.
 QString headerOf(const QString& payload)
 {
-    const int us = payload.indexOf(kUS);
+    const int us = usIndex(payload);
     return us < 0 ? payload : payload.left(us);
 }
 
 QString afterUS(const QString& payload)
 {
-    const int us = payload.indexOf(kUS);
+    const int us = usIndex(payload);
     return us < 0 ? QString() : payload.mid(us + 1);
 }
 
@@ -250,15 +273,14 @@ QJsonObject decodeToJson(const QString& raw)
         o.insert(QStringLiteral("height"), fields.value(2).toInt());
         const QString data = afterUS(payload);
         o.insert(QStringLiteral("hasData"), !data.isEmpty());
-        // Hand QML a data: URI so an Image can render it directly. Bounded, and
-        // the mime is echoed from the wire — so restrict it to image types
-        // rather than letting a peer choose an arbitrary URI scheme payload.
-        const QString mime = fields.value(0);
-        if (!data.isEmpty() && data.size() <= (kMaxInlineBytes * 4) / 3 + 8
-            && mime.startsWith(QLatin1String("image/"))) {
-            o.insert(QStringLiteral("dataUri"),
-                     QStringLiteral("data:%1;base64,%2").arg(mime, data));
-        }
+        // NO data: URI here. The Basecamp QML sandbox blocks them, so an Image
+        // bound to one renders nothing — silently, which is exactly how this
+        // presented: photos that arrived and decoded fine and simply did not
+        // appear. The backend materialises the bytes into the cache instead and
+        // hands the view a file:// URL (see PeersUiBackend's `imageUri`).
+        //
+        // The mime is still gated to image/* there: it is echoed from the wire,
+        // and a peer must not get to choose what kind of file we write and open.
         o.insert(QStringLiteral("text"), QStringLiteral("📷 Photo"));
         break;
     }
