@@ -201,7 +201,75 @@ async function main() {
     throw new Error("delete-for-me removed the message from the PEER — it must be local only");
   step("delete for me: peer still has it (local only, as Peers intends)");
 
-  console.log("\nPASS: reply, reaction, pin, unpin, context menu and local delete.");
+  // ── forward carries the MESSAGE, not its rendered text ─────────────────
+  //
+  // A self-only group is a legitimate second conversation and needs no network,
+  // so this stays a local assertion about what forwarding actually sends.
+  const convosBefore = await evalq(bob, "root.conversations.length");
+  await evalq(bob, `root.backend.createGroupConversation("Forward target", "")`);
+  await waitFor(async () => (await evalq(bob, "root.conversations.length")) > convosBefore, {
+    timeout: 30000,
+    what: "the forward-target group to be created",
+  });
+  const target = JSON.parse(
+    await evalq(
+      bob,
+      "JSON.stringify(root.conversations.map(c => ({id: c.convoId, name: c.displayName})))",
+    ),
+  ).find((c) => c.name === "Forward target");
+  if (!target) throw new Error("the forward-target group is not in the conversation list");
+
+  // Forward an INCOMING message. The message key is FNV-1a over
+  // "<author> <body>", so forwarding your OWN message verbatim necessarily
+  // produces the same key — a documented collision, not a bug. Forwarding a
+  // peer's message changes the author, which is the case worth asserting.
+  let source = null;
+  {
+    const n = await evalq(bob, "root.messages.length");
+    for (let i = 0; i < n; i++) {
+      const m = JSON.parse(await evalq(bob, `JSON.stringify(root.messages[${i}])`));
+      if (m.fromSelf === false) { source = m; break; }
+    }
+  }
+  if (!source) throw new Error("no incoming message to forward");
+  await evalq(
+    bob,
+    `root.backend.forwardMessage(${JSON.stringify(convoId)}, ${JSON.stringify(source.key)}, ` +
+      `${JSON.stringify(target.id)})`,
+  );
+  await evalq(bob, `root.backend.selectConversation(${JSON.stringify(target.id)})`);
+  // Gate on the LOADED conversation, not just on there being messages: the old
+  // thread still has messages, so "length > 0" is true the instant we ask and
+  // the assertions below would run against the source message itself.
+  await waitFor(
+    async () =>
+      (await evalq(bob, "root.backend.loadedConversationId")) === target.id
+      && (await evalq(bob, "root.messages.length")) > 0,
+    { timeout: 30000, what: "the forwarded message to land in the target conversation" },
+  );
+  const landed = JSON.parse(await evalq(bob, "JSON.stringify(root.messages[0])"));
+  if (landed.text !== source.text)
+    throw new Error(`forward changed the text: "${source.text}" -> "${landed.text}"`);
+  if (source.kind === "reply") {
+    // Forwarding a reply UNWRAPS it: the quote key identifies a message in the
+    // original thread and means nothing in this one, so carrying it over would
+    // render "Original message unavailable" on every forwarded reply.
+    if (landed.kind !== "text")
+      throw new Error(`a forwarded reply should arrive as text, got ${landed.kind}`);
+    if (landed.quotedText)
+      throw new Error("a forwarded reply carried its quote into the new thread");
+  } else if (landed.kind !== source.kind) {
+    throw new Error(`forward changed the kind: ${source.kind} -> ${landed.kind}`);
+  }
+  // A forward is a NEW message from us: same body, different author, so a
+  // different key. Reactions on the original must not follow it around.
+  if (landed.key === source.key)
+    throw new Error("the forwarded message kept the original's key");
+  if (landed.fromSelf !== true) throw new Error("the forwarded message is not marked as ours");
+  step(`forward: carried into another conversation (${source.kind} -> ${landed.kind}, new key)`);
+  await evalq(bob, `root.backend.selectConversation(${JSON.stringify(convoId)})`);
+
+  console.log("\nPASS: reply, reaction, pin, unpin, context menu, local delete and forward.");
   alice.disconnect();
   bob.disconnect();
   process.exit(EXIT_OK);

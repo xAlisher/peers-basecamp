@@ -26,6 +26,17 @@ Item {
     readonly property var reactions: msg.reactions !== undefined ? msg.reactions : []
     // The amplitude bars measured when the note was recorded (voice notes only).
     readonly property var waveform: msg.waveform !== undefined ? msg.waveform : []
+    readonly property string senderLabel: msg.senderLabel !== undefined ? msg.senderLabel : ""
+    readonly property string senderHex: msg.senderHex !== undefined ? msg.senderHex : ""
+    // A label was actually set — otherwise senderLabel IS the hex and printing
+    // both would say the same thing twice.
+    readonly property bool senderNamed: senderLabel !== "" && senderLabel !== senderHex
+
+    // The label is user-supplied text going into a StyledText, so it has to be
+    // escaped — a peer's label is not markup.
+    function escapeHtml(t) {
+        return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
 
     function mmss(ms) {
         const total = Math.round(ms / 1000);
@@ -78,6 +89,29 @@ Item {
                 root.menuRequested(root.msg, p.x, p.y);
             }
         }
+
+        // Who sent this. Android draws it above every INCOMING bubble, 1:1 and
+        // group alike (resolveAttribution): the local label in the primary
+        // colour, the short hex dimmed beside it, or just the hex when the peer
+        // has no label. In a busy group an unattributed bubble is unreadable.
+        ColumnLayout {
+            spacing: 2
+            Layout.maximumWidth: rowLayout.width * Theme.bubbleMaxWidthRatio
+
+            Text {
+                visible: !root.own && root.senderHex !== ""
+                Layout.fillWidth: true
+                textFormat: Text.StyledText
+                text: root.senderNamed
+                      ? ("<font color=\"" + Theme.text + "\">" + root.escapeHtml(root.senderLabel)
+                         + "</font> <font color=\"" + Theme.textDim + "\">" + root.senderHex
+                         + "</font>")
+                      : ("<font color=\"" + Theme.textDim + "\">" + root.senderHex + "</font>")
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.captionSize
+                elide: Text.ElideRight
+                maximumLineCount: 1
+            }
 
         Rectangle {
             id: bubble
@@ -353,6 +387,7 @@ Item {
                     font.pixelSize: Theme.captionSize
                 }
             }
+        }
         }
 
         Item { Layout.fillWidth: true }

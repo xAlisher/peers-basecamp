@@ -396,6 +396,11 @@ bool PeersUiBackend::loadMessages(const QString& convoId)
         row.insert(QStringLiteral("sender"), sender);
         row.insert(QStringLiteral("senderLabel"),
                    sender.isEmpty() ? QStringLiteral("Peer") : displayFor(sender));
+        // The short hex, always, alongside the label. Android's attribution line
+        // shows BOTH — the name you gave someone and the identity it stands for
+        // — so a friendly label can never quietly stand in for the wrong account.
+        row.insert(QStringLiteral("senderHex"),
+                   sender.isEmpty() ? QString() : shortLabel(sender));
 
         // Hosted media: hand the view a local file once we have it, and start
         // the fetch when we do not. The decryption key never reaches QML.
