@@ -90,7 +90,12 @@ export async function evalq(insp, expression) {
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export async function waitFor(fn, { timeout = 30000, interval = 1000, what } = {}) {
+// `network: true` marks a wait on something that has to CROSS THE NETWORK. A
+// timeout there is a delivery failure, not a logic failure, and the two must not
+// look alike: reporting flaky delivery as "an assertion failed" is exactly what
+// trains people to ignore a suite. Such a timeout carries `isNetwork` so the
+// scenario can exit with EXIT_NETWORK instead.
+export async function waitFor(fn, { timeout = 30000, interval = 1000, what, network = false } = {}) {
   const deadline = Date.now() + timeout;
   let last;
   while (Date.now() < deadline) {
@@ -101,7 +106,33 @@ export async function waitFor(fn, { timeout = 30000, interval = 1000, what } = {
     }
     await sleep(interval);
   }
-  throw new Error(`timed out waiting for ${what}${last ? ` (last: ${last.message})` : ""}`);
+  const err = new Error(
+    `timed out waiting for ${what}${last ? ` (last: ${last.message})` : ""}`,
+  );
+  err.isNetwork = network;
+  throw err;
+}
+
+// Standard tail for a scenario: classify the failure before choosing an exit
+// code, and dump both sides' state either way.
+export async function fail(e, instances) {
+  if (e.isNetwork) {
+    console.error(
+      `\nNETWORK: ${e.message}\n` +
+        "Something did not cross the live fleet in time. This is the known-flaky\n" +
+        "delivery path, NOT an assertion failure in our code. Re-run before investigating.",
+    );
+  } else {
+    console.error(`\nFAILED: ${e.message}`);
+  }
+  for (const i of instances) {
+    try {
+      await dump(i);
+    } catch {
+      /* best effort */
+    }
+  }
+  process.exit(e.isNetwork ? EXIT_NETWORK : EXIT_FAIL);
 }
 
 export function step(msg) {
@@ -203,6 +234,7 @@ export async function inviteAndJoin(from, to, address, { attempts = 3 } = {}) {
     try {
       await waitFor(async () => (await convoIds(to)).includes(convoId), {
         timeout: 120000,
+        network: true,
         what: `${to.name} to join conversation ${convoId}`,
       });
       return convoId;

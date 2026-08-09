@@ -22,6 +22,7 @@ import {
   step,
   shoot,
   dump,
+  fail,
   inviteAndJoin,
   EXIT_OK,
   EXIT_FAIL,
@@ -146,6 +147,7 @@ async function main() {
   // ── receive ─────────────────────────────────────────────────────────────
   await waitFor(async () => (await findByKind(alice, "photo")) !== null, {
     timeout: 150000,
+    network: true,
     what: "alice to receive the photo",
   });
   const got = await findByKind(alice, "photo");
@@ -188,13 +190,4 @@ async function main() {
   process.exit(EXIT_OK);
 }
 
-main().catch(async (e) => {
-  console.error(`\nFAILED: ${e.message}`);
-  try {
-    await dump(alice);
-    await dump(bob);
-  } catch {
-    /* best effort */
-  }
-  process.exit(EXIT_FAIL);
-});
+main().catch((e) => fail(e, [alice, bob]));

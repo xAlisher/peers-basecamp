@@ -23,6 +23,7 @@ import {
   step,
   shoot,
   dump,
+  fail,
   convoIds,
   EXIT_OK,
   EXIT_FAIL,
@@ -119,6 +120,7 @@ async function main() {
   try {
     await waitFor(async () => (await convoIds(alice)).includes(groupId), {
       timeout: 150000,
+      network: true,
       what: `alice to join group ${groupId}`,
     });
   } catch {
@@ -156,7 +158,7 @@ async function main() {
       }
       return false;
     },
-    { timeout: 150000, what: "alice to receive bob's group message" },
+    { timeout: 150000, network: true, what: "alice to receive bob's group message" },
   );
   step("alice: received bob's group message");
   await shoot(alice, "12-alice-group-message.png");
@@ -173,7 +175,7 @@ async function main() {
       }
       return false;
     },
-    { timeout: 150000, what: "bob to receive alice's group message" },
+    { timeout: 150000, network: true, what: "bob to receive alice's group message" },
   );
   step("bob: received alice's group message");
   await shoot(bob, "13-bob-group-roundtrip.png");
@@ -195,13 +197,4 @@ async function main() {
   process.exit(EXIT_OK);
 }
 
-main().catch(async (e) => {
-  console.error(`\nFAILED: ${e.message}`);
-  try {
-    await dump(alice);
-    await dump(bob);
-  } catch {
-    /* best effort */
-  }
-  process.exit(EXIT_FAIL);
-});
+main().catch((e) => fail(e, [alice, bob]));

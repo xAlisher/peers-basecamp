@@ -17,6 +17,7 @@ import {
   step,
   shoot,
   dump,
+  fail,
   inviteAndJoin,
   EXIT_OK,
   EXIT_FAIL,
@@ -69,6 +70,7 @@ async function main() {
   );
   await waitFor(async () => (await findMessage(alice, BOB_MSG)) !== null, {
     timeout: 150000,
+    network: true,
     what: "alice to receive bob's message",
   });
   const onAlice = await findMessage(alice, BOB_MSG);
@@ -96,7 +98,7 @@ async function main() {
       const r = await findMessage(bob, ALICE_REPLY);
       return r !== null && r.kind === "reply" && r.replyToKey === onAlice.key;
     },
-    { timeout: 150000, what: "bob to render alice's reply as a quote of his message" },
+    { timeout: 150000, network: true, what: "bob to render alice's reply as a quote of his message" },
   );
   // The quote must show the QUOTED text, not the reply's own body. Binding the
   // reply's text into the quote box is an easy mistake and it shipped once —
@@ -121,7 +123,7 @@ async function main() {
       if (!r || !r.reactions) return false;
       return r.reactions.some((x) => x.emoji === EMOJI && x.count >= 1);
     },
-    { timeout: 150000, what: "bob to see the reaction on his message" },
+    { timeout: 150000, network: true, what: "bob to see the reaction on his message" },
   );
   step("reaction: renders on the peer, attached to the right message");
   await shoot(bob, "21-bob-sees-reaction.png");
@@ -144,7 +146,7 @@ async function main() {
       const pinned = JSON.parse(await evalq(alice, "root.backend.currentPinnedJson"));
       return pinned && pinned.key === onAlice.key;
     },
-    { timeout: 150000, what: "alice to see the pin" },
+    { timeout: 150000, network: true, what: "alice to see the pin" },
   );
   step("pin: propagates to the peer");
   await shoot(alice, "22-alice-sees-pin.png");
@@ -156,7 +158,7 @@ async function main() {
       const pinned = JSON.parse(await evalq(alice, "root.backend.currentPinnedJson"));
       return !pinned || !pinned.key;
     },
-    { timeout: 150000, what: "alice's pin to clear" },
+    { timeout: 150000, network: true, what: "alice's pin to clear" },
   );
   step("unpin: clears on the peer");
 
@@ -166,13 +168,4 @@ async function main() {
   process.exit(EXIT_OK);
 }
 
-main().catch(async (e) => {
-  console.error(`\nFAILED: ${e.message}`);
-  try {
-    await dump(alice);
-    await dump(bob);
-  } catch {
-    /* best effort */
-  }
-  process.exit(EXIT_FAIL);
-});
+main().catch((e) => fail(e, [alice, bob]));

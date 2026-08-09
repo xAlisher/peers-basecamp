@@ -18,6 +18,7 @@ import {
   step,
   shoot,
   dump,
+  fail,
   inviteAndJoin,
   EXIT_OK,
   EXIT_FAIL,
@@ -79,7 +80,7 @@ async function main() {
       if ((await evalq(alice, "root.messages.length")) < 1) return false;
       return (await evalq(alice, "root.messages[0].text")) === BOB_MSG;
     },
-    { timeout: 120000, what: "alice to receive bob's message" },
+    { timeout: 120000, network: true, what: "alice to receive bob's message" },
   );
   await shoot(alice, "03-alice-received.png");
   step("alice: received bob's message");
@@ -104,7 +105,7 @@ async function main() {
       }
       return false;
     },
-    { timeout: 120000, what: "bob to receive the reply" },
+    { timeout: 120000, network: true, what: "bob to receive the reply" },
   );
   await shoot(bob, "05-bob-roundtrip.png");
   step("bob: received the reply");
@@ -115,13 +116,4 @@ async function main() {
   process.exit(EXIT_OK);
 }
 
-main().catch(async (e) => {
-  console.error(`\nFAILED: ${e.message}`);
-  try {
-    await dump(alice);
-    await dump(bob);
-  } catch {
-    /* best effort */
-  }
-  process.exit(EXIT_FAIL);
-});
+main().catch((e) => fail(e, [alice, bob]));
