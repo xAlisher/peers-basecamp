@@ -41,13 +41,13 @@ Android ground truth: `docs/FEATURE-INVENTORY.md` (extracted from source with `p
 
 | Feature | Android | Basecamp | Notes |
 |---|---|---|---|
-| Create group (name + description) | yes | `wip` | Backend wired to `create_group_conversation` |
-| Add members | yes | `wip` | Backend wired to `add_group_member` |
-| Group info / roster, pending invites | yes | `wip` | Roster distinguishes committed vs pending |
+| Create group (name + description) | yes | `done` | Verified two-instance: shared name renders on both sides — `scripts/run-exchange.sh` with `TEST=tests/group.mjs` |
+| Add members | yes | `done` | Alice joins, roster reaches 2 committed, messages flow both ways |
+| Group info / roster, pending invites | yes | `wip` | Committed count verified (2). The **pending** state was never observed — the roster only refreshes on `members_changed`/selection, so the invite window is missed. No roster UI yet |
 | Leave group (remote) | yes | `blocked` | **No core primitive.** `chat_module` 0.2.2 offers only `delete_conversation`, which is local. Next step: upstream request, or a `leave1:` marker convention matching Android |
 | Rename group / remove member / wipe | yes | `todo` | Check against the contract before promising |
 | Pinned messages + pinned bar | yes | `todo` | Codec decodes `pin1:` |
-| Group avatar | yes | `wip` | `HexAvatar` with `kind: "group"`, shared convo id as seed |
+| Group avatar | yes | `done` | Group identicon renders in row and header — screenshot `interop-desktop/13-bob-group-roundtrip.png` |
 | Group storage opt-out (`gcfg1:`) | yes | `todo` | |
 | Desync auto-recovery / re-add request (`readd1:`) | yes | `todo` | Control marker; folded, never a bubble |
 

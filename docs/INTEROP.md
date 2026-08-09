@@ -59,9 +59,9 @@ Status: `—` not yet run · `✅` passed with evidence · `❌` failed · `⚠�
 | **MLS invite propagates between two `peers_ui` instances** | ✅ pass | `alice joined the conversation` on attempt 1 |
 | **1:1 text, A → B** | ✅ pass | `scripts/run-exchange.sh` — 2 consecutive green runs |
 | **1:1 text, B → A** | ✅ pass | reply received by the sender |
-| Group: create | — | |
-| Group: add member, roster visible to all | — | |
-| Group: message to all members | — | |
+| **Group: create** | ✅ pass | shared name renders on both sides — `10-bob-group-created.png`, `11-alice-joined-group.png` |
+| **Group: add member** | ✅ pass | alice joins; bob's roster reaches 2 committed |
+| **Group: messages both ways** | ✅ pass | `12-alice-group-message.png`, `13-bob-group-roundtrip.png` |
 | Photo, both directions | — | |
 | GIF, both directions | — | |
 | Video, both directions | — | |
@@ -71,6 +71,14 @@ Status: `—` not yet run · `✅` passed with evidence · `❌` failed · `⚠�
 | Pin renders on the peer | — | |
 | Forward | — | |
 | Ordering + offline catch-up | — | |
+
+### Known gap: the pending-invite window is not observed
+
+`add_group_member` commits and delivers asynchronously, so a member should appear as **pending**
+before the group commits them. The group run never saw that state: our roster only refreshes on
+`members_changed` or on selection, so the invite window is missed and the count jumps straight to
+committed. Messages and the final roster are correct, but the pending affordance Peers shows on
+Android is not reproduced yet.
 
 ### Resolved: the "messages never arrive" symptom was a stale instance
 

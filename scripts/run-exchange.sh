@@ -82,7 +82,8 @@ for i in $(seq 1 60); do
   sleep 5
 done
 
-node tests/exchange.mjs "$A_PORT" "$B_PORT"
+TEST=${TEST:-tests/exchange.mjs}
+node "$TEST" "$A_PORT" "$B_PORT"
 rc=$?
 
 if [ $rc -ne 0 ]; then
