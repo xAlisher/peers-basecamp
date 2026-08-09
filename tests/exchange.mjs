@@ -20,6 +20,7 @@
 // than having no suite.
 //
 import net from "node:net";
+import fs from "node:fs";
 
 const ALICE_PORT = Number(process.argv[2] ?? 5591);
 const BOB_PORT = Number(process.argv[3] ?? 5592);
@@ -128,6 +129,24 @@ function step(msg) {
   console.log(msg);
 }
 
+// Per-instance capture over the inspector. Works offscreen, so each side is
+// grabbed independently — two windows on one X display would overlap.
+const OUT_DIR = process.env.OUT_DIR || "docs/screenshots/interop-desktop";
+async function shoot(insp, name) {
+  try {
+    const r = await insp.send("screenshot", {});
+    if (r.error || !r.image) {
+      console.log(`  (screenshot ${name} unavailable: ${r.error || "no image"})`);
+      return;
+    }
+    fs.mkdirSync(OUT_DIR, { recursive: true });
+    fs.writeFileSync(`${OUT_DIR}/${name}`, Buffer.from(r.image, "base64"));
+    console.log(`  screenshot ${name} (${r.width}x${r.height})`);
+  } catch (e) {
+    console.log(`  (screenshot ${name} failed: ${e.message})`);
+  }
+}
+
 async function main() {
   const alice = new Inspector(ALICE_PORT, "alice");
   const bob = new Inspector(BOB_PORT, "bob");
@@ -155,6 +174,7 @@ async function main() {
   if (!address || String(address).length < 32)
     throw new Error(`alice's address looks wrong: ${JSON.stringify(address)}`);
   step(`alice address: ${String(address).length} chars`);
+  await shoot(alice, "01-alice-address.png");
 
   // ── the invite, with retries (see JOIN FLAKINESS above) ──────────────────
   let joined = false;
@@ -244,6 +264,7 @@ async function main() {
     timeout: 30000,
     what: "bob's message in his own thread",
   });
+  await shoot(bob, "02-bob-sent.png");
   step("bob: sent");
 
   // Alice selects the SAME conversation id, not conversations[0].
@@ -258,6 +279,7 @@ async function main() {
     },
     { timeout: 120000, what: "alice to receive bob's message" },
   );
+  await shoot(alice, "03-alice-received.png");
   step("alice: received bob's message");
 
   // ── alice → bob ─────────────────────────────────────────────────────────
@@ -269,6 +291,7 @@ async function main() {
     timeout: 30000,
     what: "alice's reply in her thread",
   });
+  await shoot(alice, "04-alice-replied.png");
   step("alice: replied");
 
   await waitFor(
@@ -281,6 +304,7 @@ async function main() {
     },
     { timeout: 120000, what: "bob to receive the reply" },
   );
+  await shoot(bob, "05-bob-roundtrip.png");
   step("bob: received the reply");
 
   console.log("\nPASS: bidirectional round-trip between two peers_ui instances.");

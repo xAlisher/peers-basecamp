@@ -23,11 +23,11 @@ Android ground truth: `docs/FEATURE-INVENTORY.md` (extracted from source with `p
 
 | Feature | Android | Basecamp | Notes |
 |---|---|---|---|
-| Conversation list + rows | yes | `wip` | List populates from live conversations (harness); row rendering not yet screenshot-verified |
+| Conversation list + rows | yes | `done` | Row with identicon, name, preview and timestamp — screenshot |
 | Conversation row menu (open/group info/delete) | yes | `todo` | Android has no archive/mute/pin-conversation |
-| Chat thread + bubbles | yes | `wip` | `MessageBubble` built to spec; unverified |
+| Chat thread + bubbles | yes | `done` | Own bubble accent + white text, peer bubble #1F1F1F, sender identicon — screenshot `interop-desktop/05-bob-roundtrip.png` |
 | Day separator chips | yes | `todo` | |
-| Composer + drafts | yes | `wip` | Draft persistence in the backend; UI unverified |
+| Composer + drafts | yes | `wip` | Composer renders and sends (screenshot); draft persistence across switching unverified |
 | Send / receive | yes | `done` | Two-instance round-trip, 2 consecutive green runs (`scripts/run-exchange.sh`) |
 | Send state: pending / failed / retry | yes | `wip` | |
 | **Delivered / read receipts** | **no** | **`dropped`** | Android has none (`ChatScreen.tsx:3`). Do not invent them |
