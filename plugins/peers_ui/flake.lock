@@ -97934,11 +97934,11 @@
         "logos-module-builder": "logos-module-builder_16"
       },
       "locked": {
-        "lastModified": 1786272987,
-        "narHash": "sha256-44AVylPryQdeSc3ezNo49hKI+N9zEzWn8baTsZ38TtQ=",
+        "lastModified": 1786296904,
+        "narHash": "sha256-IVAjx7qogF52H/+F+b455kefDKM4gfjMCLXgWc3XkOI=",
         "owner": "xAlisher",
         "repo": "peers-core",
-        "rev": "6a4e4ef2ebfe3b6a4f16c02ca8b9546e7bf91cd6",
+        "rev": "3d147e7e61abf2ec153bf27f2348e5d69fe828c5",
         "type": "github"
       },
       "original": {
