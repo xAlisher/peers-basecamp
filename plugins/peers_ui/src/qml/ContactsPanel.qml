@@ -235,157 +235,175 @@ Item {
         }
 
         // ── list ────────────────────────────────────────────────────────────
-        ListView {
-            id: list
+        // The ListView and its empty states are SIBLINGS inside a plain Item.
+        // A visual child declared inside a ListView is reparented into its
+        // contentItem, so an EmptyState there would anchor to a zero-height
+        // content area precisely when count === 0 — and never draw.
+        Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            clip: true
-            model: root.filtered
-            boundsBehavior: Flickable.StopAtBounds
 
-            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+            ListView {
+                id: list
+                anchors.fill: parent
+                clip: true
+                model: root.filtered
+                boundsBehavior: Flickable.StopAtBounds
 
-            delegate: Item {
-                id: row
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
-                required property var modelData
+                delegate: Item {
+                    id: row
 
-                readonly property string address: root.contactAddress(modelData)
-                readonly property string label: root.contactLabel(modelData)
-                readonly property bool verified: modelData
-                                                 && modelData.verified === true
-                readonly property string avatar: modelData
-                                                 && modelData.avatar !== undefined
-                                                 && modelData.avatar !== null
-                                                 ? String(modelData.avatar) : ""
+                    required property var modelData
 
-                width: list.width
-                implicitHeight: 56
+                    readonly property string address: root.contactAddress(modelData)
+                    readonly property string label: root.contactLabel(modelData)
+                    readonly property bool verified: modelData
+                                                     && modelData.verified === true
+                    readonly property string avatar: modelData
+                                                     && modelData.avatar !== undefined
+                                                     && modelData.avatar !== null
+                                                     ? String(modelData.avatar) : ""
 
-                HoverHandler { id: rowHover }
-                // Primary action: open (or create) the 1:1 with this person.
-                TapHandler { onTapped: root.startChat(row.address) }
+                    width: list.width
+                    implicitHeight: 56
 
-                Rectangle {
-                    anchors.fill: parent
-                    color: rowHover.hovered ? Theme.panel : "transparent"
-                }
+                    HoverHandler { id: rowHover }
+                    // Primary action: open (or create) the 1:1 with this person.
+                    TapHandler { onTapped: root.startChat(row.address) }
 
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: Theme.space4
-                    anchors.rightMargin: Theme.space3
-                    spacing: Theme.space3
-
-                    HexAvatar {
-                        size: 32
-                        seed: row.address
-                        kind: "contact"
-                        avatarSource: row.avatar
+                    Rectangle {
+                        anchors.fill: parent
+                        color: rowHover.hovered ? Theme.panel : "transparent"
                     }
 
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 2
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: Theme.space4
+                        anchors.rightMargin: Theme.space3
+                        spacing: Theme.space3
 
-                        RowLayout {
+                        HexAvatar {
+                            size: 32
+                            seed: row.address
+                            kind: "contact"
+                            avatarSource: row.avatar
+                        }
+
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            spacing: Theme.space1
+                            spacing: 2
 
-                            Text {
+                            RowLayout {
+                                id: titleRow
                                 Layout.fillWidth: true
-                                // Without a label the hex itself becomes the
-                                // white primary line (ChatScreen.tsx:432-438).
-                                text: row.label !== ""
-                                      ? row.label : root.shortAddress(row.address)
-                                color: Theme.text
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.bodySize
-                                font.weight: Font.Medium
-                                elide: Text.ElideRight
-                            }
+                                spacing: Theme.space1
 
-                            // VerifiedBadge, size 14 (ConversationsScreen.tsx:118).
-                            Item {
-                                id: seal
-                                visible: row.verified
-                                implicitWidth: 14
-                                implicitHeight: 14
-                                readonly property real s: implicitWidth / 24
+                                Text {
+                                    // NOT fillWidth: the seal must sit against the
+                                    // name (titleRow gap 4, ConversationsScreen.tsx:550),
+                                    // and a fillWidth name would shove it to the far
+                                    // right where it reads as a status column. A
+                                    // Layout leaves its trailing slack empty when no
+                                    // child fills, which is exactly what we want.
+                                    Layout.maximumWidth: titleRow.width
+                                                         - (seal.visible
+                                                            ? seal.implicitWidth + titleRow.spacing
+                                                            : 0)
+                                    // Without a label the hex itself becomes the
+                                    // white primary line (ChatScreen.tsx:432-438).
+                                    text: row.label !== ""
+                                          ? row.label : root.shortAddress(row.address)
+                                    color: Theme.text
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.bodySize
+                                    font.weight: Font.Medium
+                                    elide: Text.ElideRight
+                                }
 
-                                Shape {
-                                    anchors.fill: parent
-                                    antialiasing: true
+                                // VerifiedBadge, size 14 (ConversationsScreen.tsx:118).
+                                Item {
+                                    id: seal
+                                    visible: row.verified
+                                    implicitWidth: 14
+                                    implicitHeight: 14
+                                    readonly property real s: implicitWidth / 24
 
-                                    ShapePath {
-                                        fillColor: Theme.verified
-                                        strokeColor: "transparent"
-                                        strokeWidth: 0
-                                        scale: Qt.size(seal.s, seal.s)
-                                        PathSvg { path: root.sealPath }
-                                    }
-                                    ShapePath {
-                                        fillColor: "transparent"
-                                        strokeColor: "#FFFFFF"
-                                        strokeWidth: 2 * seal.s
-                                        capStyle: ShapePath.RoundCap
-                                        joinStyle: ShapePath.RoundJoin
-                                        scale: Qt.size(seal.s, seal.s)
-                                        PathSvg { path: "M8.4 12.3 L11 14.8 L15.7 9.2" }
+                                    Shape {
+                                        anchors.fill: parent
+                                        antialiasing: true
+
+                                        ShapePath {
+                                            fillColor: Theme.verified
+                                            strokeColor: "transparent"
+                                            strokeWidth: 0
+                                            scale: Qt.size(seal.s, seal.s)
+                                            PathSvg { path: root.sealPath }
+                                        }
+                                        ShapePath {
+                                            fillColor: "transparent"
+                                            strokeColor: Theme.onAccent
+                                            strokeWidth: 2 * seal.s
+                                            capStyle: ShapePath.RoundCap
+                                            joinStyle: ShapePath.RoundJoin
+                                            scale: Qt.size(seal.s, seal.s)
+                                            PathSvg { path: "M8.4 12.3 L11 14.8 L15.7 9.2" }
+                                        }
                                     }
                                 }
                             }
+
+                            Text {
+                                Layout.fillWidth: true
+                                // Only a labelled contact needs the hex sub-line —
+                                // an unlabelled one already shows it above.
+                                visible: row.label !== ""
+                                text: root.shortAddress(row.address)
+                                color: Theme.textDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.labelSize
+                                elide: Text.ElideRight
+                            }
                         }
 
-                        Text {
-                            Layout.fillWidth: true
-                            // Only a labelled contact needs the hex sub-line —
-                            // an unlabelled one already shows it above.
-                            visible: row.label !== ""
-                            text: root.shortAddress(row.address)
-                            color: Theme.textDim
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.labelSize
-                            elide: Text.ElideRight
+                        // Row actions. Kept permanently in the layout and merely
+                        // dimmed when idle: appearing-on-hover affordances vanish
+                        // from the offscreen screenshot captures we verify with.
+                        PeersIcon {
+                            // No pencil glyph exists in PeersIcon; `userplus` is the
+                            // closest existing contact-identity glyph. Noted in the
+                            // component report rather than inventing path data.
+                            name: "userplus"
+                            size: 16
+                            color: labelHover.hovered ? Theme.text : Theme.textFaint
+                            opacity: rowHover.hovered || labelHover.hovered ? 1.0 : 0.55
+                            HoverHandler { id: labelHover }
+                            TapHandler {
+                                onTapped: labelDialog.open(row.address, row.label)
+                            }
+                        }
+
+                        PeersIcon {
+                            name: "trash"
+                            size: 16
+                            color: removeHover.hovered ? Theme.unread : Theme.textFaint
+                            opacity: rowHover.hovered || removeHover.hovered ? 1.0 : 0.55
+                            HoverHandler { id: removeHover }
+                            TapHandler { onTapped: root.removeContact(row.address) }
                         }
                     }
 
-                    // Row actions. Kept permanently in the layout and merely
-                    // dimmed when idle: appearing-on-hover affordances vanish
-                    // from the offscreen screenshot captures we verify with.
-                    PeersIcon {
-                        // No pencil glyph exists in PeersIcon; `userplus` is the
-                        // closest existing contact-identity glyph. Noted in the
-                        // component report rather than inventing path data.
-                        name: "userplus"
-                        size: 16
-                        color: labelHover.hovered ? Theme.text : Theme.textFaint
-                        opacity: rowHover.hovered || labelHover.hovered ? 1.0 : 0.55
-                        HoverHandler { id: labelHover }
-                        TapHandler {
-                            onTapped: labelDialog.open(row.address, row.label)
-                        }
+                    // Separator, inset past the avatar (ContactsScreen.tsx:454).
+                    Rectangle {
+                        anchors.bottom: parent.bottom
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.leftMargin: Theme.space4
+                        height: Theme.hairline
+                        color: Theme.border
+                        opacity: 0.5
                     }
-
-                    PeersIcon {
-                        name: "trash"
-                        size: 16
-                        color: removeHover.hovered ? Theme.unread : Theme.textFaint
-                        opacity: rowHover.hovered || removeHover.hovered ? 1.0 : 0.55
-                        HoverHandler { id: removeHover }
-                        TapHandler { onTapped: root.removeContact(row.address) }
-                    }
-                }
-
-                // Separator, inset past the avatar (ContactsScreen.tsx:454).
-                Rectangle {
-                    anchors.bottom: parent.bottom
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.leftMargin: Theme.space4
-                    height: Theme.hairline
-                    color: Theme.border
-                    opacity: 0.5
                 }
             }
 
@@ -526,8 +544,8 @@ Item {
                     Item { Layout.fillWidth: true }
 
                     Rectangle {
-                        width: 90
-                        height: 34
+                        Layout.preferredWidth: 90
+                        Layout.preferredHeight: 34
                         radius: Theme.radiusCard
                         color: "transparent"
                         border.width: Theme.hairline
@@ -542,8 +560,8 @@ Item {
                         TapHandler { onTapped: labelDialog.close() }
                     }
                     Rectangle {
-                        width: 90
-                        height: 34
+                        Layout.preferredWidth: 90
+                        Layout.preferredHeight: 34
                         radius: Theme.radiusCard
                         color: saveHover.hovered ? Theme.accentHover : Theme.accent
                         HoverHandler { id: saveHover }

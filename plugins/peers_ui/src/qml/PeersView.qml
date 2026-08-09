@@ -40,6 +40,15 @@ Rectangle {
     // Parsed once per change rather than on every delegate binding.
     property var conversations: []
     property var messages: []
+    property var contacts: []
+    property var members: []
+    property var settings: ({})
+    property var pinned: ({})
+
+    // Whether the right pane shows the group-info detail instead of the thread.
+    property bool detailsShown: false
+    // The image currently open full-size, "" when the viewer is closed.
+    property string viewerSource: ""
 
     function reparse() {
         if (!backend)
@@ -54,6 +63,32 @@ Rectangle {
         } catch (e) {
             messages = [];
         }
+        try {
+            contacts = JSON.parse(backend.contactsJson || "[]");
+        } catch (e) {
+            contacts = [];
+        }
+        try {
+            members = JSON.parse(backend.membersJson || "[]");
+        } catch (e) {
+            members = [];
+        }
+        try {
+            settings = JSON.parse(backend.settingsJson || "{}");
+        } catch (e) {
+            settings = ({});
+        }
+        try {
+            pinned = JSON.parse(backend.currentPinnedJson || "{}");
+        } catch (e) {
+            pinned = ({});
+        }
+    }
+
+    // Every backend call goes through here so a failure always reaches the user
+    // instead of vanishing. logos.watch is the only path that surfaces errors.
+    function call(promise) {
+        logos.watch(promise, function () {}, function (err) { errorStrip.show(String(err)); });
     }
 
     Connections {
@@ -70,6 +105,11 @@ Rectangle {
         ignoreUnknownSignals: true
         function onConversationsJsonChanged() { root.reparse(); }
         function onMessagesJsonChanged() { root.reparse(); }
+        function onContactsJsonChanged() { root.reparse(); }
+        function onMembersJsonChanged() { root.reparse(); }
+        function onSettingsJsonChanged() { root.reparse(); }
+        function onCurrentPinnedJsonChanged() { root.reparse(); }
+        function onCurrentConversationIdChanged() { root.detailsShown = false; }
         function onError(message) { errorStrip.show(message); }
         function onSendFailed(conversationId, content) {
             // Hand the text back rather than losing it.
@@ -225,13 +265,26 @@ Rectangle {
                     }
                 }
 
+                ContactsPanel {
+                    id: contactsPanel
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    visible: root.section === "contacts"
+                    contacts: root.contacts
+                    myAddress: root.backend ? (root.backend.myAddress || "") : ""
+                    myLabel: root.backend ? (root.backend.myLabel || "") : ""
+                    onStartChat: function (address) { root.call(root.backend.createConversation(address)); root.section = "chats"; }
+                    onRemoveContact: function (address) { root.call(root.backend.removeContact(address)); }
+                    onSetLabel: function (address, label) { root.call(root.backend.setContactLabel(address, label)); }
+                }
+
                 EmptyState {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    visible: root.section !== "chats"
-                    glyph: root.section === "contacts" ? "contacts" : "settings"
-                    title: root.section === "contacts" ? "Contacts" : "Settings"
-                    hint: "Not wired up yet."
+                    visible: root.section === "settings"
+                    glyph: "settings"
+                    title: "Settings"
+                    hint: "Choose a setting on the right."
                 }
             }
         }
@@ -255,7 +308,7 @@ Rectangle {
                 Item {
                     Layout.fillWidth: true
                     Layout.preferredHeight: Theme.headerHeight
-                    visible: parent.parent.hasConversation
+                    visible: root.section === "chats" && parent.parent.hasConversation
                     RowLayout {
                         anchors.fill: parent
                         anchors.leftMargin: Theme.space4
@@ -274,6 +327,20 @@ Rectangle {
                             font.weight: Font.Medium
                             elide: Text.ElideRight
                         }
+                        // Group info toggle — only meaningful for a group.
+                        Rectangle {
+                            Layout.rightMargin: Theme.space3
+                            visible: root.backend && root.backend.currentIsGroup
+                            width: 32; height: 32
+                            radius: Theme.radiusCard
+                            color: root.detailsShown ? Theme.panel : "transparent"
+                            PeersIcon {
+                                anchors.centerIn: parent
+                                name: "groups"; size: 18
+                                color: root.detailsShown ? Theme.accent : Theme.textDim
+                            }
+                            TapHandler { onTapped: root.detailsShown = !root.detailsShown }
+                        }
                     }
                 }
 
@@ -281,7 +348,14 @@ Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: Theme.hairline
                     color: Theme.border
-                    visible: parent.parent.hasConversation
+                    visible: root.section === "chats" && parent.parent.hasConversation
+                }
+
+                PinnedBar {
+                    Layout.fillWidth: true
+                    visible: parent.parent.hasConversation && !root.detailsShown
+                    pinned: root.pinned
+                    onUnpin: root.call(root.backend.unpinMessage(root.backend.currentConversationId))
                 }
 
                 ListView {
@@ -291,7 +365,7 @@ Rectangle {
                     Layout.margins: Theme.space4
                     clip: true
                     spacing: Theme.space2
-                    visible: parent.parent.hasConversation
+                    visible: parent.parent.hasConversation && !root.detailsShown
                     model: root.messages
                     // Newest at the bottom, and stay there as messages arrive.
                     onCountChanged: positionViewAtEnd()
@@ -300,6 +374,7 @@ Rectangle {
                         required property var modelData
                         width: thread.width
                         msg: modelData
+                        onImageClicked: function (uri) { root.viewerSource = uri; }
                         // Folded control markers (reactions, pins, avatar
                         // broadcasts) must never occupy a bubble.
                         visible: modelData.folded !== true
@@ -307,10 +382,51 @@ Rectangle {
                     }
                 }
 
+                GroupInfoPanel {
+                    id: groupInfoPanel
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    visible: root.section === "chats" && parent.parent.hasConversation && root.detailsShown
+                    convoId: root.backend ? root.backend.currentConversationId : ""
+                    groupName: root.backend ? (root.backend.currentDisplayName || "") : ""
+                    groupDescription: root.backend ? (root.backend.currentDescription || "") : ""
+                    members: root.members
+                    memberCount: root.backend ? root.backend.memberCount : 0
+                    pendingMemberCount: root.backend ? root.backend.pendingMemberCount : 0
+                    onClose: root.detailsShown = false
+                    onAddMember: addMemberDialog.open()
+                    onLeaveGroup: root.call(root.backend.leaveGroup(root.backend.currentConversationId))
+                }
+
+                // The right pane in the Contacts section: your own address, for
+                // sharing. Without this the pane was simply black.
+                AddressCard {
+                    id: addressCard
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.margins: Theme.space6
+                    visible: root.section === "contacts"
+                    address: root.backend ? (root.backend.myAddress || "") : ""
+                    label: root.backend ? (root.backend.myLabel || "") : ""
+                    onCopy: root.call(root.backend.copyToClipboard(root.backend.myAddress))
+                }
+
+                SettingsPanel {
+                    id: settingsPanel
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    visible: root.section === "settings"
+                    settings: root.settings
+                    myAddress: root.backend ? (root.backend.myAddress || "") : ""
+                    deliveryPreset: "logos.test"
+                    onSetSetting: function (key, jsonValue) { root.call(root.backend.setSetting(key, jsonValue)); }
+                    onResetRequested: root.call(root.backend.resetIdentityAndData())
+                }
+
                 EmptyState {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    visible: !parent.parent.hasConversation
+                    visible: root.section === "chats" && !parent.parent.hasConversation
                     glyph: "chats"
                     title: "Select a conversation"
                     hint: root.backend && root.backend.myAddress
@@ -321,7 +437,7 @@ Rectangle {
                     id: composer
                     Layout.fillWidth: true
                     Layout.margins: Theme.space4
-                    visible: parent.parent.hasConversation
+                    visible: root.section === "chats" && parent.parent.hasConversation && !root.detailsShown
                     placeholder: root.backend
                                  ? "Message " + (root.backend.currentDisplayName || "")
                                  : "Message"
@@ -334,6 +450,121 @@ Rectangle {
                 }
             }
         }
+    }
+
+    // ── full-size media ─────────────────────────────────────────────────────
+    MediaViewer {
+        anchors.fill: parent
+        visible: root.viewerSource !== ""
+        source: root.viewerSource
+        onClosed: root.viewerSource = ""
+    }
+
+    // ── add a member to the current group ───────────────────────────────────
+    Rectangle {
+        id: addMemberDialog
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, 0.6)
+        visible: false
+
+        function open()  { memberField.text = ""; visible = true; memberField.forceActiveFocus(); }
+        function close() { visible = false; }
+
+        TapHandler { onTapped: addMemberDialog.close() }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 460
+            implicitHeight: memberCol.implicitHeight + Theme.space6 * 2
+            height: implicitHeight
+            radius: Theme.radiusCard
+            color: Theme.panel
+            border.width: Theme.hairline
+            border.color: Theme.border
+            TapHandler { onTapped: {} }
+
+            ColumnLayout {
+                id: memberCol
+                anchors.fill: parent
+                anchors.margins: Theme.space6
+                spacing: Theme.space3
+
+                Text {
+                    text: "Add a member"
+                    color: Theme.text
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.titleSize
+                    font.weight: Font.Medium
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: "The invite is committed and delivered asynchronously — they appear as pending until the group commits them."
+                    color: Theme.textDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.labelSize
+                    wrapMode: Text.Wrap
+                }
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 40
+                    radius: Theme.radiusCard
+                    color: Theme.pane
+                    border.width: Theme.hairline
+                    border.color: memberField.activeFocus ? Theme.accent : Theme.border
+                    TextField {
+                        id: memberField
+                        anchors.fill: parent
+                        anchors.leftMargin: Theme.space3
+                        anchors.rightMargin: Theme.space3
+                        placeholderText: "Peer address"
+                        placeholderTextColor: Theme.textFaint
+                        color: Theme.text
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.codeSize
+                        background: null
+                        Keys.onReturnPressed: function (event) { event.accepted = true; addMember(); }
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.space2
+                    Item { Layout.fillWidth: true }
+                    Rectangle {
+                        width: 90; height: 34; radius: Theme.radiusCard
+                        color: "transparent"
+                        border.width: Theme.hairline
+                        border.color: Theme.border
+                        Text {
+                            anchors.centerIn: parent; text: "Cancel"
+                            color: Theme.textDim
+                            font.family: Theme.fontFamily; font.pixelSize: Theme.labelSize
+                        }
+                        TapHandler { onTapped: addMemberDialog.close() }
+                    }
+                    Rectangle {
+                        width: 90; height: 34; radius: Theme.radiusCard
+                        color: memberField.text.trim().length > 0 ? Theme.accent : Theme.pane
+                        Text {
+                            anchors.centerIn: parent; text: "Add"
+                            color: memberField.text.trim().length > 0 ? Theme.onAccent : Theme.textFaint
+                            font.family: Theme.fontFamily; font.pixelSize: Theme.labelSize
+                        }
+                        TapHandler {
+                            enabled: memberField.text.trim().length > 0
+                            onTapped: addMember()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    function addMember() {
+        const addr = memberField.text.trim();
+        if (addr.length === 0 || !backend)
+            return;
+        call(backend.addGroupMember(backend.currentConversationId, addr));
+        addMemberDialog.close();
     }
 
     // ── new chat ────────────────────────────────────────────────────────────

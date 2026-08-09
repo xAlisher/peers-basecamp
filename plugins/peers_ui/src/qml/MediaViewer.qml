@@ -73,7 +73,11 @@ Rectangle {
                  || root.source === ""
         text: photo.status === Image.Error ? "media unavailable"
               : (root.source === "" ? "no media" : "loading…")
-        color: Qt.rgba(1, 1, 1, 0.6)
+        // Android spec is rgba(255,255,255,0.6); expressed as the text token at
+        // 60% so the colour still comes from Theme. The overlay ground is always
+        // black, so this stays legible without a second palette.
+        color: Theme.text
+        opacity: 0.6
         font.family: Theme.fontFamily
         font.pixelSize: 15
     }

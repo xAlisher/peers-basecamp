@@ -108,6 +108,10 @@ Built by `loadMessages(convoId)` in two passes over `chat_module.get_messages()`
 | `contact` | `addr1:` | `address`, `label` | `text` = `"Contact: <label>"`, or `"Shared a contact"` when unlabelled. `address` is validated hex (≤128 chars) before it is emitted; a non-hex address flips the row to `kind: "unknown"` + `[unreadable contact]`. Tap → `createConversation(address)`. |
 | `unknown` | any unimplemented / malformed | — | `text` is one of the bracketed placeholders. Render it as a plain, visually muted bubble. |
 
+The `📷` / `🎤` / `📍` above are literal characters *inside the backend's string*
+(`ContentMarkers.cpp` — `decodeToJson`), not an icon slot. Render `text` verbatim and never add an
+emoji of your own beside it: every icon in this UI is a vector `PeersIcon`.
+
 ---
 
 ### `key` — the cross-device message identity

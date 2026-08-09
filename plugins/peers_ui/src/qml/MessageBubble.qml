@@ -25,6 +25,10 @@ Item {
     readonly property bool pending: msg.state === "pending"
     readonly property var reactions: msg.reactions !== undefined ? msg.reactions : []
 
+    // Raised when the user taps an inline photo, so the view can open the
+    // full-size viewer. The bubble itself stays presentational.
+    signal imageClicked(string uri)
+
     implicitHeight: rowLayout.implicitHeight
     implicitWidth: parent ? parent.width : 0
 
@@ -125,6 +129,11 @@ Item {
                     // A peer-supplied image must not be able to blow up memory
                     // through its declared dimensions.
                     sourceSize.width: 640
+
+                    TapHandler {
+                        enabled: photo.visible
+                        onTapped: root.imageClicked(photo.source)
+                    }
                 }
 
                 Text {

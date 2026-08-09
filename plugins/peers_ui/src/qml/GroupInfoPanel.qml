@@ -221,10 +221,12 @@ Rectangle {
         }
 
         // ── roster ──────────────────────────────────────────────────────────
-        // The empty state is a SIBLING of the ListView, not a child of it: a
-        // visual child of a ListView is reparented to its contentItem, whose
-        // height is 0 when the model is empty — an `anchors.fill: parent` empty
-        // state inside a ListView therefore never shows up.
+        // The empty state is a SIBLING of the ListView, not a child of it, so it
+        // is anchored to the viewport rather than living inside the flickable's
+        // content — it cannot be scrolled away and does not depend on
+        // contentHeight, which is 0 in exactly the case the empty state exists
+        // for. Verified rendering under the software backend with an empty
+        // roster.
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
