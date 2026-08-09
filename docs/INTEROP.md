@@ -63,7 +63,7 @@ Status: `—` not yet run · `✅` passed with evidence · `❌` failed · `⚠�
 | **Group: add member** | ✅ pass | alice joins; bob's roster reaches 2 committed |
 | **Group: messages both ways** | ✅ pass | `12-alice-group-message.png`, `13-bob-group-roundtrip.png` |
 | **Photo (inline)** | ✅ pass | bob → alice, rendered from a data URI — `30-bob-sent-photo.png`, `31-alice-received-photo.png` |
-| GIF, both directions | — | |
+| **Hosted media (>256 KiB)** | ✅ pass | 1 MB photo round-trips byte-identical; a blob written by an INDEPENDENT Android-format implementation reads back byte-identical — `50-alice-hosted-media.png` |
 | Video, both directions | — | |
 | Voice note, both directions | — | |
 | **Reply renders as a quote on the peer** | ✅ pass | quote shows the ORIGINAL text — `20-bob-sees-reply.png` |

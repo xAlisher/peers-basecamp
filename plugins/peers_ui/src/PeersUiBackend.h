@@ -13,6 +13,7 @@
 #include "logos_ui_plugin_context.h" // LogosUiPluginContext: modules() + onContextReady()
 
 class QTimer;
+class StorageClient;
 
 //
 // The Peers backend. Bridges QML (logos.module("peers_ui")) to the upstream
@@ -139,6 +140,12 @@ private:
     // here is listed as unimplemented in docs/PARITY.md.
     void reportUnimplemented(const QString& what);
 
+    // Lazily-created Logos-Storage client for the store2: hosted-media path.
+    StorageClient* storage();
+    // Fetch + decrypt a hosted blob, then re-render the thread.
+    void fetchHostedMedia(const QString& convoId, const QString& cid, const QString& keyB64,
+                          const QString& cap, const QString& mime);
+
     // Persisted app state (settings, drafts, contacts, PIN verifier) under the
     // host-assigned instance directory.
     void loadState();
@@ -160,6 +167,14 @@ private:
     QHash<QString, QString> m_lastPreview;
 
     QTimer* m_healthTimer = nullptr;
+    // Logos-Storage client for hosted media (the store2: path). Null until
+    // first use.
+    StorageClient* m_storage = nullptr;
+    // convoId+cid already being fetched, so a re-render doesn't refetch.
+    QSet<QString> m_fetching;
+    // cid → local decrypted file, so a fetched blob is handed to the view
+    // without going near the network again.
+    QHash<QString, QString> m_mediaPaths;
 };
 
 #endif // PEERS_UI_BACKEND_H

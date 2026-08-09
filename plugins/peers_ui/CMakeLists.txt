@@ -18,6 +18,10 @@ logos_module(
         src/ContentMarkers.cpp
         src/BackupReader.h
         src/BackupReader.cpp
+        src/MediaPadding.h
+        src/MediaPadding.cpp
+        src/StorageClient.h
+        src/StorageClient.cpp
     INCLUDE_DIRS
         src
 )

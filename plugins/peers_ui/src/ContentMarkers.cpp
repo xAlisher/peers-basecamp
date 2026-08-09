@@ -194,19 +194,39 @@ QJsonObject decodeToJson(const QString& raw)
 
     switch (kind) {
     case Kind::HostedMedia: {
-        // cid:key:mime:w:h[:cap]
+        // cid:key:mime:w:h[:cap] — exactly 5 or 6 fields, per media.ts:65-92.
+        // Anything else is refused rather than partially believed.
+        if (fields.size() < 5 || fields.size() > 6) {
+            o.insert(QStringLiteral("kind"), kindName(Kind::Unknown));
+            o.insert(QStringLiteral("text"), QStringLiteral("[unreadable media]"));
+            break;
+        }
+        const int mw = fields.value(3).toInt();
+        const int mh = fields.value(4).toInt();
+        if (mw < 1 || mw > 100000 || mh < 1 || mh > 100000) {
+            o.insert(QStringLiteral("kind"), kindName(Kind::Unknown));
+            o.insert(QStringLiteral("text"), QStringLiteral("[unreadable media]"));
+            break;
+        }
+        o.insert(QStringLiteral("padded"), raw.startsWith(QLatin1String("store2:")));
+        // The 6th field is the fetch CAPABILITY, not a caption. There is no
+        // caption field in this grammar at all (docs/CONTENT-MARKERS.md §1) —
+        // treating the cap as one printed a hex blob as the message body.
+        o.insert(QStringLiteral("cap"), fields.value(5));
         o.insert(QStringLiteral("cid"), fields.value(0));
         o.insert(QStringLiteral("mime"), fields.value(2));
-        o.insert(QStringLiteral("width"), fields.value(3).toInt());
-        o.insert(QStringLiteral("height"), fields.value(4).toInt());
-        const QString cap = clampLabel(fields.value(5));
-        o.insert(QStringLiteral("caption"), cap);
+        o.insert(QStringLiteral("width"), mw);
+        o.insert(QStringLiteral("height"), mh);
         // The decryption key is deliberately NOT surfaced to QML.
-        const QString mime = fields.value(2);
+        const QString hmime = fields.value(2);
         o.insert(QStringLiteral("text"),
-                 cap.isEmpty() ? (mime.startsWith(QLatin1String("video")) ? QStringLiteral("Video")
-                                                                         : QStringLiteral("Media"))
-                               : cap);
+                 hmime.startsWith(QLatin1String("video"))
+                     ? QStringLiteral("Video")
+                     : (hmime == QLatin1String("image/gif")
+                            ? QStringLiteral("GIF")
+                            : (hmime.startsWith(QLatin1String("image"))
+                                   ? QStringLiteral("📷 Photo")
+                                   : QStringLiteral("Media"))));
         break;
     }
     case Kind::InlinePhoto: {
@@ -392,6 +412,18 @@ QString encodeContactCard(const QString& address, const QString& label)
 }
 
 int maxInlineBytes() { return kMaxInlineBytes; }
+
+QString encodeHostedMedia(const QString& cid, const QString& keyB64, const QString& mime,
+                          int width, int height, const QString& cap)
+{
+    // Field order is cid:key:mime:w:h[:cap] and none of those may contain a
+    // colon, which is what makes a plain split unambiguous on the far side.
+    const QString head = QStringLiteral("store2:%1:%2:%3:%4:%5")
+                             .arg(cid, keyB64, mime)
+                             .arg(width)
+                             .arg(height);
+    return cap.isEmpty() ? head : head + QLatin1Char(':') + cap;
+}
 
 QString encodeInlinePhoto(const QString& mime, int width, int height, const QByteArray& bytes)
 {

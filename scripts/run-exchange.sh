@@ -63,9 +63,16 @@ done
 rm -rf "$WORK"; mkdir -p "$WORK/alice" "$WORK/bob"
 trap reap EXIT
 
+# Hosted media needs a storage bearer token. It is NEVER committed — supply it
+# in the environment (the Android build takes it as a gradle property for the
+# same reason). Without it, hosted media is disabled and the module says so.
+export PEERS_STORAGE_BASE="${PEERS_STORAGE_BASE:-https://msg.logos.live/s/api/storage/v1}"
+export PEERS_STORAGE_TOKEN="${PEERS_STORAGE_TOKEN:-}"
+
 launch() { # name, user-dir, inspector port
   ( cd "$MOD" && \
     QT_QPA_PLATFORM=offscreen QML_INSPECTOR_PORT="$3" TMPDIR=/extra/tmp \
+    PEERS_STORAGE_BASE="$PEERS_STORAGE_BASE" PEERS_STORAGE_TOKEN="$PEERS_STORAGE_TOKEN" \
     setsid nix run . --accept-flake-config -- --user-dir "$2" \
       > "$WORK/$1.log" 2>&1 &
     echo $! > "$WORK/$1.pgid" )   # setsid makes the child its own group leader

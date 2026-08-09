@@ -366,7 +366,12 @@ Rectangle {
 
                 PinnedBar {
                     Layout.fillWidth: true
+                    // Setting `visible` here REPLACES the component's own
+                    // `visible: pinKey !== ""`, so the empty-pin condition has to
+                    // be restated — otherwise the bar shows with nothing in it.
                     visible: parent.parent.hasConversation && !root.detailsShown
+                             && root.pinned !== undefined && root.pinned !== null
+                             && root.pinned.key !== undefined && root.pinned.key !== ""
                     pinned: root.pinned
                     onUnpin: root.call(root.backend.unpinMessage(root.backend.currentConversationId))
                 }

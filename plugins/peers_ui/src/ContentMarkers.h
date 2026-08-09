@@ -99,6 +99,11 @@ QString encodeInlinePhoto(const QString& mime, int width, int height,
 QString encodeVoiceNote(const QString& mime, int durationMs,
                         const QList<int>& waveform, const QByteArray& bytes);
 
+// store2:<cid>:<key>:<mime>:<w>:<h>[:<cap>] — a Logos-Storage hosted blob.
+// Always store2 (padded); store1 is legacy and we never emit it.
+QString encodeHostedMedia(const QString& cid, const QString& keyB64, const QString& mime,
+                          int width, int height, const QString& cap);
+
 // The largest payload we will put inline, in raw bytes before base64.
 // Beyond this a message is not worth sending: it will not survive the transport.
 int maxInlineBytes();

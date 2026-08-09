@@ -44,7 +44,8 @@
       ],
       "extra_sources": [],
       "extra_link_libraries": [
-        "OpenSSL::Crypto"
+        "OpenSSL::Crypto",
+        "Qt6::Network"
       ]
     }
   }

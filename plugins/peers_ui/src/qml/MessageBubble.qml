@@ -118,7 +118,9 @@ Item {
                 // nothing here touches the filesystem or the network.
                 Image {
                     id: photo
-                    visible: root.kind === "photo" && source !== ""
+                    // Inline photos and fetched hosted media render the same way;
+                    // hosted media only has a source once the fetch completes.
+                    visible: (root.kind === "photo" || root.kind === "media") && source !== ""
                     source: root.msg.dataUri !== undefined ? root.msg.dataUri : ""
                     Layout.preferredWidth: Math.min(implicitWidth, 320)
                     Layout.preferredHeight: implicitWidth > 0
@@ -140,13 +142,24 @@ Item {
                     Layout.fillWidth: true
                     // A photo's caption is its text; with no caption the label
                     // would just repeat the picture.
-                    visible: !(root.kind === "photo" && photo.visible)
+                    visible: !photo.visible
                     text: root.msg.text !== undefined ? root.msg.text : ""
                     color: root.own ? Theme.bubbleOwnText : Theme.bubblePeerText
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.bodySize
                     wrapMode: Text.Wrap
                     textFormat: Text.PlainText   // never render peer text as markup
+                }
+
+                // Hosted media still downloading. Without this the bubble looks
+                // like a plain text message saying "Photo" until the fetch lands.
+                Text {
+                    Layout.fillWidth: true
+                    visible: root.kind === "media" && !photo.visible
+                    text: "Downloading\u2026"
+                    color: root.own ? Qt.rgba(1, 1, 1, 0.75) : Theme.textDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.captionSize
                 }
 
                 // Reaction pills. Emoji here are CONTENT (a user picked them),

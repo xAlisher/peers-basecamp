@@ -11,9 +11,11 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QStandardPaths>
+#include <QSet>
 #include <QTimer>
 
 #include "BackupReader.h"
+#include "StorageClient.h"
 #include "ContentMarkers.h"
 
 namespace {
@@ -355,6 +357,27 @@ bool PeersUiBackend::loadMessages(const QString& convoId)
         row.insert(QStringLiteral("sender"), sender);
         row.insert(QStringLiteral("senderLabel"),
                    sender.isEmpty() ? QStringLiteral("Peer") : shortLabel(sender));
+
+        // Hosted media: hand the view a local file once we have it, and start
+        // the fetch when we do not. The decryption key never reaches QML.
+        if (row.value(QStringLiteral("kind")).toString() == QLatin1String("media")) {
+            const QString cid = row.value(QStringLiteral("cid")).toString();
+            const QStringList mf = content.mid(content.indexOf(QLatin1Char(':')) + 1)
+                                       .split(QLatin1Char(':'));
+            const QString keyB64 = mf.value(1);
+            const QString mmime = mf.value(2);
+            const QString mcap = mf.value(5);
+            if (m_mediaPaths.contains(cid)) {
+                row.insert(QStringLiteral("localPath"), m_mediaPaths.value(cid));
+                row.insert(QStringLiteral("dataUri"),
+                           QStringLiteral("file://") + m_mediaPaths.value(cid));
+            } else if (!cid.isEmpty()) {
+                const QString c = convoId;
+                deferToEventLoop([this, c, cid, keyB64, mcap, mmime] {
+                    fetchHostedMedia(c, cid, keyB64, mcap, mmime);
+                });
+            }
+        }
 
         // Resolve what a reply quotes. If the quoted message isn't in this
         // conversation's history (deleted, or before our join), say so rather
@@ -802,16 +825,6 @@ void PeersUiBackend::sendMedia(QString conversationId, QString localPath, QStrin
         return;
     }
 
-    // Check the size BEFORE reading, so a huge file never lands in memory.
-    if (info.size() > ContentMarkers::maxInlineBytes()) {
-        report(QStringLiteral("%1 is too large to send (%2 KB; the limit is %3 KB). "
-                              "Hosted media is not wired up yet.")
-                   .arg(info.fileName())
-                   .arg(info.size() / 1024)
-                   .arg(ContentMarkers::maxInlineBytes() / 1024));
-        return;
-    }
-
     QFile f(localPath);
     if (!f.open(QIODevice::ReadOnly)) {
         report(QStringLiteral("Could not read %1").arg(info.fileName()));
@@ -839,7 +852,68 @@ void PeersUiBackend::sendMedia(QString conversationId, QString localPath, QStrin
 
     int w = 0, h = 0;
     ContentMarkers::imageSize(bytes, &w, &h);   // 0x0 is fine — the view uses the natural size
-    sendMessage(conversationId, ContentMarkers::encodeInlinePhoto(mime, w, h, bytes));
+
+    // Small images ride inline as base64. Anything bigger will not survive an
+    // MLS message, so it goes to Logos Storage encrypted and only a `store2:`
+    // reference travels in the chat — the same split Android makes.
+    if (bytes.size() <= ContentMarkers::maxInlineBytes()) {
+        sendMessage(conversationId, ContentMarkers::encodeInlinePhoto(mime, w, h, bytes));
+        return;
+    }
+
+    if (!storage()->configured()) {
+        report(QStringLiteral("%1 is %2 KB — too large to send inline (limit %3 KB), and hosted "
+                              "media is not configured on this install. Set PEERS_STORAGE_TOKEN "
+                              "to enable it. Nothing was sent.")
+                   .arg(info.fileName())
+                   .arg(bytes.size() / 1024)
+                   .arg(ContentMarkers::maxInlineBytes() / 1024));
+        return;
+    }
+
+    report(QStringLiteral("Uploading %1 (%2 KB)…").arg(info.fileName()).arg(bytes.size() / 1024));
+    storage()->uploadEncrypted(bytes, [this, conversationId, mime, w, h](
+                                          bool ok, StorageClient::Uploaded u, QString err) {
+        if (!ok) {
+            report(err);
+            return;
+        }
+        sendMessage(conversationId,
+                    ContentMarkers::encodeHostedMedia(u.cid, u.keyB64, mime, w, h, u.cap));
+    });
+}
+
+StorageClient* PeersUiBackend::storage()
+{
+    if (!m_storage)
+        m_storage = new StorageClient(this);
+    return m_storage;
+}
+
+void PeersUiBackend::fetchHostedMedia(const QString& convoId, const QString& cid,
+                                      const QString& keyB64, const QString& cap,
+                                      const QString& mime)
+{
+    // One fetch per blob. Without this guard every re-render of the thread
+    // would start another download of the same media.
+    const QString token = cid;
+    if (m_fetching.contains(token))
+        return;
+    m_fetching.insert(token);
+
+    storage()->downloadDecrypt(cid, keyB64, cap, mime,
+                               [this, convoId, token](bool ok, QString path, QString err) {
+                                   m_fetching.remove(token);
+                                   if (!ok) {
+                                       report(err);
+                                       return;
+                                   }
+                                   m_mediaPaths.insert(token, path);
+                                   // Re-render the thread so the bubble picks up
+                                   // the now-local file.
+                                   if (convoId == currentConversationId())
+                                       loadMessages(convoId);
+                               });
 }
 void PeersUiBackend::saveMedia(QString a, QString b)
 {

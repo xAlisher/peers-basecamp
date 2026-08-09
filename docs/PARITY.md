@@ -71,9 +71,9 @@ Android ground truth: `docs/FEATURE-INVENTORY.md` (extracted from source with `p
 |---|---|---|---|
 | Content-marker codec | yes | `wip` | Decode for every marker + encode for reply/reaction/pin/contact-card, verified cross-device. Media encode and malformed-input unit tests still open |
 | Photo, inline (`img1:` wire / `img1v:` local row) | yes | `done` | Sent, decoded and rendered on the peer; PNG/JPEG dimensions read from the header (no QtGui) — `tests/media.mjs`, screenshots 30/31 |
-| Hosted media (`store2:` current, `store1:` legacy) | yes | `todo` | Decode only. Needs a storage-module dependency; until then anything over 256 KB is **refused with a clear message** rather than silently dropped |
-| GIF | yes | `todo` | Rides the hosted-media marker |
-| Video | yes | `todo` | Rides the hosted-media marker |
+| Hosted media (`store2:` current, `store1:` legacy) | yes | `done` | Full Android blob format — Padmé padding, AES-256-GCM, `iv‖ct‖tag`, `POST /data`. Verified BOTH ways incl. reading a blob written by an independent implementation (`tests/hosted-media.mjs`). Needs `PEERS_STORAGE_TOKEN`; without it, disabled and said so |
+| GIF | yes | `wip` | Transport works (hosted media); animated playback in the bubble not verified |
+| Video | yes | `wip` | Transport works (hosted media); inline playback not built |
 | Voice notes, 2:00 cap (`voc1:` wire / `voc1v:` local row) | yes | `todo` | `MAX_RECORDING_MS = 120000` |
 | Media viewer (zoom / page / save) | yes | `todo` | |
 | Reactions (`react1:`) | yes | `done` | Pill renders on the peer with count>1 rule; folded so no raw bubble — `tests/interactions.mjs` |
