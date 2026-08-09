@@ -201,8 +201,33 @@ disables the fill.
 **`metadata.json` `icon` is repo-root-relative**, and the flake's git `src` only sees files that
 have been `git add`-ed. A new icon that is not staged is invisible to the build.
 
-**`chat_module` has no identity import** and Peers Android runs a different libchat generation — see
-ADR 0004 before promising anything about adopting an address or phone interop.
+**`peers_core` has no identity import** — see ADR 0004 before promising anything about adopting a
+backup's address. (Phone interop itself is solved, by the forks — ADR 0007.)
+
+**Killing `nix run` does not kill the app.** `logos-standalone-app-bin` forks a `logos_host_qt` per
+module and they survive, holding the inspector port — so the next run silently drives the OLD build.
+That reads as state surviving a wiped `--user-dir`, or as a flaky network. Launch under `setsid`,
+kill the process group, preflight the port, and match on **argv**. In `pkill -f`, use the
+`'[l]ike-this'` bracket trick or you match and kill your own shell.
+
+---
+
+## The forks — read before touching the core
+
+Peers runs a **forked** chat core. `peers_ui` depends on **`peers_core`**
+([xAlisher/peers-core](https://github.com/xAlisher/peers-core)), built on
+[**`peers-libchat`**](https://github.com/xAlisher/peers-libchat) — NOT upstream `chat_module`.
+
+Peers Android does not speak upstream's wire format: conversations are addressed by an opaque
+`route_tag` rather than `hex(group_id)`, payloads are outer-encrypted, and the group context carries
+`GROUP_SECRET` (0xFF02), which every member's leaf capabilities must advertise. An upstream-built
+client is rejected before a conversation can form. See ADR 0007 and `docs/FORK-MAINTENANCE.md`.
+
+**`peers_core` talks to Peers Android and NOT to stock Basecamp `chat_ui`.** Intended trade.
+
+Delivery pins the same entry node the phone uses (`msg.logos.live`). That switches delivery to its
+**flat** config shape, whose listening ports are FIXED — so two *pinned* instances cannot share a
+host. Anything running two locally sets `PEERS_DELIVERY_NODE=""`.
 
 ---
 

@@ -318,18 +318,28 @@ QJsonObject decodeToJson(const QString& raw)
         break;
     }
     case Kind::Reaction: {
-        // <+|->emoji:key
-        if (header.isEmpty()) {
+        // <+|-><emoji>:<key> — split on the LAST colon, not the first. Android
+        // does this deliberately (reactions.ts:53-67): an emoji contains no
+        // colon and the key is trailing hex, so lastIndexOf is unambiguous while
+        // a first-colon split breaks. Also reject lastIndexOf(':') < 2 and an op
+        // that is not + or -, exactly as Android does.
+        const int sep = payload.lastIndexOf(QLatin1Char(':'));
+        const QChar op = payload.isEmpty() ? QChar() : payload.at(0);
+        if (sep < 2 || (op != QLatin1Char('+') && op != QLatin1Char('-'))) {
             o.insert(QStringLiteral("kind"), kindName(Kind::Unknown));
             o.insert(QStringLiteral("text"), QString());
             break;
         }
-        const QChar op = payload.at(0);
-        const int sep = payload.indexOf(QLatin1Char(':'), 1);
+        const QString emoji = payload.mid(1, sep - 1);
+        const QString key = payload.mid(sep + 1);
+        if (emoji.isEmpty() || key.isEmpty()) {
+            o.insert(QStringLiteral("kind"), kindName(Kind::Unknown));
+            o.insert(QStringLiteral("text"), QString());
+            break;
+        }
         o.insert(QStringLiteral("add"), op == QLatin1Char('+'));
-        o.insert(QStringLiteral("emoji"), sep < 0 ? QString() : payload.mid(1, sep - 1).left(16));
-        o.insert(QStringLiteral("targetKey"),
-                 sep < 0 ? QString() : payload.mid(sep + 1).left(kMaxKeyLen));
+        o.insert(QStringLiteral("emoji"), emoji.left(16));
+        o.insert(QStringLiteral("targetKey"), key.left(kMaxKeyLen));
         o.insert(QStringLiteral("text"), QString());
         break;
     }

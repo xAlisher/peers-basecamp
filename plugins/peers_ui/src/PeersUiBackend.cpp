@@ -274,9 +274,11 @@ bool PeersUiBackend::loadMessages(const QString& convoId)
     // occupy a bubble — so the first pass collects them and the second attaches
     // them to the message they target. A single pass would miss a reaction that
     // arrives before the message it points at, which happens on catch-up.
+    // Android folds reactions as a SET OF REACTORS per emoji (reactions.ts:70-114):
+    // count = set.size, so the same person reacting twice still counts once, and
+    // a '-' removes that reactor. Incrementing a counter instead double-counts.
     struct Fold {
-        QHash<QString, int> counts;       // emoji → count
-        QSet<QString> mine;               // emoji this account reacted with
+        QHash<QString, QSet<QString>> reactors;   // emoji → set of reactor ids
     };
     QHash<QString, Fold> reactions;       // target key → folded reactions
     QString pinnedKey;
@@ -337,19 +339,18 @@ bool PeersUiBackend::loadMessages(const QString& convoId)
         const QString emoji = o.value(QStringLiteral("emoji")).toString();
         if (emoji.isEmpty())
             continue;
+        // Who reacted: this account for our own, else the sender's address.
+        const QString reactor = m.value(QStringLiteral("from_self")).toBool()
+            ? me
+            : m.value(QStringLiteral("sender")).toString();
+
         Fold& f = reactions[target];
         if (o.value(QStringLiteral("add")).toBool()) {
-            f.counts[emoji] = f.counts.value(emoji) + 1;
-            if (m.value(QStringLiteral("from_self")).toBool())
-                f.mine.insert(emoji);
+            f.reactors[emoji].insert(reactor);
         } else {
-            const int left = f.counts.value(emoji) - 1;
-            if (left > 0)
-                f.counts[emoji] = left;
-            else
-                f.counts.remove(emoji);
-            if (m.value(QStringLiteral("from_self")).toBool())
-                f.mine.remove(emoji);
+            f.reactors[emoji].remove(reactor);
+            if (f.reactors.value(emoji).isEmpty())
+                f.reactors.remove(emoji);
         }
     }
 
@@ -415,11 +416,15 @@ bool PeersUiBackend::loadMessages(const QString& convoId)
         if (reactions.contains(key)) {
             const Fold& f = reactions.value(key);
             QJsonArray pills;
-            for (auto it = f.counts.begin(); it != f.counts.end(); ++it) {
+            for (auto it = f.reactors.begin(); it != f.reactors.end(); ++it) {
+                QJsonArray who;
+                for (const QString& r : it.value())
+                    who.append(r.isEmpty() ? QStringLiteral("unknown") : shortLabel(r));
                 pills.append(QJsonObject{
                     { QStringLiteral("emoji"), it.key() },
-                    { QStringLiteral("count"), it.value() },
-                    { QStringLiteral("mine"), f.mine.contains(it.key()) },
+                    { QStringLiteral("count"), it.value().size() },
+                    { QStringLiteral("mine"), it.value().contains(me) },
+                    { QStringLiteral("who"), who },   // long-press shows who reacted
                 });
             }
             if (!pills.isEmpty())
