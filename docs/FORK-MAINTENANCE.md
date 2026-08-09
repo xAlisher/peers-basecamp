@@ -53,3 +53,16 @@ The Peers delta exists to keep the desktop and the phone on **one wire format**.
 change to it, ask whether the phone still parses what the desktop emits — the failure mode is not a
 compile error, it is a client that connects, forms no conversation, and reports
 `the capabilities of the add proposal are insufficient for this group`.
+
+## Delivery entry node
+
+`peers_core` takes `ChatConfig.delivery_node` (a multiaddr) and pins it, so the desktop enters the
+cluster through the same node as Peers Android (`msg.logos.live`). `peers_ui` sets it by default.
+
+It works by switching to delivery's **flat** config shape — bare `WakuNodeConf` keys, no
+`mode`/`messagingOverrides` wrappers. The layered shape accepts no entry-node key at all, and mixing
+the two is rejected. `preset` is valid flat too, so the network is kept.
+
+**Cost:** the flat parser uses FIXED listening ports, so two *pinned* instances cannot share a host.
+Anything running two locally (`scripts/run-exchange.sh`) sets `PEERS_DELIVERY_NODE=""` to get the
+layered shape back.

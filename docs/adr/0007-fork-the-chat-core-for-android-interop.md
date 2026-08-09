@@ -18,8 +18,8 @@ Two cheaper explanations were checked first and **ruled out by direct inspection
 - **Not the delivery network.** Both clients are Waku **cluster 2**, all 8 shards, same
   `/kym/1/<addr>/proto` content-topic namespace — read from the running instance's own delivery log.
   Android pins `msg.logos.live`, Basecamp uses the `logos.test` preset's `status.im` nodes, but
-  that is an entry-node difference on one cluster, not two networks. (Pinning turned out not to be
-  expressible in `delivery_module` v0.2.0 either — issue #60.)
+  that is an entry-node difference on one cluster, not two networks. (Pinning is now done anyway — via delivery's
+  flat config shape — so both clients enter the cluster through `msg.logos.live`.)
 - **Not the ciphersuite.** Shipped Android patches `CIPHER_SUITE` back to
   `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`; the libchat rev `chat_module` 0.2.2 rides
   (`5c55c2ee`) is **also** MLS_128 — upstream reverted its own XWING flip. They agree.

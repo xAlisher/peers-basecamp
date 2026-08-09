@@ -69,10 +69,17 @@ trap reap EXIT
 export PEERS_STORAGE_BASE="${PEERS_STORAGE_BASE:-https://msg.logos.live/s/api/storage/v1}"
 export PEERS_STORAGE_TOKEN="${PEERS_STORAGE_TOKEN:-}"
 
+# Two instances on ONE host must NOT pin a delivery entry node. Pinning switches
+# delivery to the flat config shape, whose listening ports are FIXED — so the
+# second instance collides with the first. Unpinned uses the layered shape, which
+# leaves every port OS-assigned. Empty here means "use the preset's own nodes".
+export PEERS_DELIVERY_NODE="${PEERS_DELIVERY_NODE-}"
+
 launch() { # name, user-dir, inspector port
   ( cd "$MOD" && \
     QT_QPA_PLATFORM=offscreen QML_INSPECTOR_PORT="$3" TMPDIR=/extra/tmp \
     PEERS_STORAGE_BASE="$PEERS_STORAGE_BASE" PEERS_STORAGE_TOKEN="$PEERS_STORAGE_TOKEN" \
+    PEERS_DELIVERY_NODE="$PEERS_DELIVERY_NODE" \
     setsid nix run . --accept-flake-config -- --user-dir "$2" \
       > "$WORK/$1.log" 2>&1 &
     echo $! > "$WORK/$1.pgid" )   # setsid makes the child its own group leader

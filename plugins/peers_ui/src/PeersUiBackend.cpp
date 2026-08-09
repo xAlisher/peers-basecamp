@@ -27,26 +27,18 @@ constexpr const char* kChatLogLevel = "info";
 
 // The delivery entry node Peers Android pins by default
 // (src/stores/deliveryNode.ts: DEFAULT_DELIVERY_NODE). Entering the cluster
-// through the same node as the phone would make desktop<->phone delivery prompt.
+// through the SAME node as the phone is what makes desktop<->phone delivery
+// prompt rather than waiting on gossip to find its way across cluster 2.
 //
-// OFF BY DEFAULT, because delivery_module v0.2.0 gives no way to express it:
-//   - `kernelConf.entryNodes` is only accepted with entryLayer "kernel", which
-//     mounts the transport with NO messaging client (naming the layer explicitly
-//     does not help — the parser still rejects kernelConf);
-//   - a top-level `entryNodes` is rejected alongside the wrapper keys
-//     ("Unrecognized configuration option(s) found: entryNodes,
-//     localStoragePath") — and localStoragePath is injected by delivery_module
-//     itself, so a fully-flat config is not ours to write either.
-// With the pin set, createNode FAILS and the client has no delivery at all —
-// strictly worse than not pinning. peers_core keeps the plumbing so this becomes
-// a one-line change once delivery exposes an override; tracked in
-// peers-basecamp#60.
+// Pinning switches peers_core to delivery's FLAT config shape, whose listening
+// ports are FIXED — so two PINNED instances cannot share a host. The
+// two-instance tests therefore set PEERS_DELIVERY_NODE="" and get the layered
+// shape with OS-assigned ports.
 //
-// Not a blocker for Android interop: both clients are Waku cluster 2 on the same
-// content-topic namespace, so traffic crosses regardless of entry node.
-//
-// Set PEERS_DELIVERY_NODE to opt in once delivery supports it.
-constexpr const char* kDefaultDeliveryNode = "";
+// Set PEERS_DELIVERY_NODE to override, or empty to use the preset's own nodes.
+constexpr const char* kDefaultDeliveryNode =
+    "/dns4/msg.logos.live/tcp/30304/p2p/"
+    "16Uiu2HAmNdX1s7wRhygyWKmYiUst84329TSz3byLEP6FjcoxDbH4";
 
 constexpr int kHealthIntervalMs = 15000;
 
