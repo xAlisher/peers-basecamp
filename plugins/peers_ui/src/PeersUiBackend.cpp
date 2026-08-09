@@ -418,8 +418,19 @@ void PeersUiBackend::applyMessageSent(const QVariantList& a)
 
 void PeersUiBackend::applyConversationCreated(const QVariantList& a)
 {
-    Q_UNUSED(a)
-    deferToEventLoop([this] { refreshConversations(); });
+    // conversation_created(convo_id, is_outgoing, peer_label, kind, name, desc)
+    const QString convoId = a.value(0).toString();
+    const bool isOutgoing = a.value(1).toBool();
+
+    deferToEventLoop([this, convoId, isOutgoing] {
+        refreshConversations();
+        // A conversation this installation started should open, the way it does
+        // on Android — the user asked for it, so putting them in it is the
+        // expected behaviour rather than leaving them on an empty pane.
+        // An INCOMING conversation must not steal the current selection.
+        if (isOutgoing && !convoId.isEmpty() && currentConversationId().isEmpty())
+            selectConversation(convoId);
+    });
 }
 
 void PeersUiBackend::applyConversationUpdated(const QVariantList& a)

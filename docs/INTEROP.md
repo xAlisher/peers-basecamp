@@ -53,8 +53,12 @@ Status: `—` not yet run · `✅` passed with evidence · `❌` failed · `⚠�
 
 | Cell | Status | Evidence |
 |---|---|---|
-| 1:1 text, A → B | — | |
-| 1:1 text, B → A | — | |
+| Two `peers_ui` instances both reach Online | ✅ pass | `scripts/run-exchange.sh` |
+| Distinct identities (different `get_address()`) | ✅ pass | alice `3ef6eb6c…`, bob `c99690f3…` |
+| Storage isolation per `--user-dir` | ✅ pass | separate `module_data/chat_module/<id>` per instance |
+| **MLS invite propagates between two `peers_ui` instances** | ✅ pass | `alice joined the conversation` on attempt 1 |
+| 1:1 text, A → B | ❌ open | message never appears in either thread — see below |
+| 1:1 text, B → A | — | blocked on the above |
 | Group: create | — | |
 | Group: add member, roster visible to all | — | |
 | Group: message to all members | — | |
@@ -67,6 +71,30 @@ Status: `—` not yet run · `✅` passed with evidence · `❌` failed · `⚠�
 | Pin renders on the peer | — | |
 | Forward | — | |
 | Ordering + offline catch-up | — | |
+
+### Open: messages do not appear after `send_message`
+
+`scripts/run-exchange.sh` gets as far as a joined conversation and then stalls. State dump from both
+sides at failure:
+
+```
+root.backend.currentConversationId = ""      (on BOTH, after selectConversation was called)
+root.backend.messagesJson          = "[]"
+root.conversations.length          = 3       (identical convoIds on both sides)
+root.backend.errors                = []      (send_message reported no error)
+```
+
+Two distinct things to chase, in order:
+
+1. **`selectConversation` does not stick.** `currentConversationId` reads back as `""` even after the
+   harness called it explicitly. Until the selection holds, `loadMessages` never runs for the right
+   conversation and `message_sent` is filtered out by the `convoId == currentConversationId()` guard.
+   Suspect the writable `PROP(QString currentConversationId)` round-trip through the QtRO replica.
+2. **One invite produced three conversations**, with identical ids on both sides. `create_conversation`
+   was called once. Understand this before trusting any message assertion — a send may be going to a
+   different conversation than the one being read.
+
+Neither is a network problem: `errors` is empty and the join succeeded.
 
 ## Desktop ⇄ Peers Android matrix
 
