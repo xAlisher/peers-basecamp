@@ -1,8 +1,0 @@
-module Peers
-singleton Theme 1.0 Theme.qml
-HexAvatar 1.0 HexAvatar.qml
-PeersIcon 1.0 PeersIcon.qml
-MessageBubble 1.0 MessageBubble.qml
-ConversationRow 1.0 ConversationRow.qml
-Composer 1.0 Composer.qml
-EmptyState 1.0 EmptyState.qml

@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import "Theme.js" as Theme
 
 // A conversation-list row: identicon, display name, preview, timestamp.
 // 64px tall, matching Peers' `layout.conversationRow`.

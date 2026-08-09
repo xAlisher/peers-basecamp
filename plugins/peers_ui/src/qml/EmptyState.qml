@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import "Theme.js" as Theme
 
 // Peers' empty/loading treatment: a centred glyph, a title and a quiet hint.
 Item {

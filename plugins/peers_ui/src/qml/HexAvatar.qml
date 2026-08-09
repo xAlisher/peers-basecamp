@@ -1,5 +1,6 @@
 import QtQuick
 import "Identicon.js" as Identicon
+import "Theme.js" as Theme
 
 //
 // The Peers identicon: a 5x5 left-right-symmetric grid of FLUSH squares (no

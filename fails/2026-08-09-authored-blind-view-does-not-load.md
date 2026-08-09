@@ -125,3 +125,46 @@ unverified code.
 - **"Compiles" and "packages" are non-events.** Don't report them as progress.
 - **Lead with what doesn't work.**
 - **When I name a protocol, stop and do it — or don't name it.**
+
+---
+
+# Resolution (same day) — and a correction to this post-mortem
+
+**The root cause named above was wrong.** I blamed the unguarded `logos.module(...)` binding. That
+*was* a real bug, but it was not what broke the load.
+
+**Actual root cause: `qml/qmldir` is builder-owned.** The builder generates it containing
+
+```
+module com.logos.module.peers_ui
+```
+
+which is how the host registers the view as a QML module. I shipped my own `src/qml/qmldir` (to
+declare a `Theme` singleton), the builder copied mine instead of generating its own, the module
+registration line vanished, the view could not be loaded — and `capability_module` SIGSEGV'd
+downstream. The segfault was a symptom two layers from the cause, which is why it read as a platform
+crash.
+
+Found by bisection in the real host, in this order: named module import → quoted directory import →
+flat layout → singleton → **qmldir**. Each step one build + one offscreen run.
+
+**Three fixes:**
+
+1. **Never ship `qml/qmldir`.** Design tokens moved from a `pragma Singleton` `Theme.qml` to a
+   `Theme.js` `.pragma library`, imported as `import "Theme.js" as Theme`. Call sites are unchanged
+   (`Theme.accent`), and no qmldir is needed at all.
+2. **Guard the binding** — `(typeof logos !== "undefined" && logos.module) ? logos.module("peers_ui") : null`,
+   and `onViewModuleReadyChanged(moduleName, isReady)` with the canonical two-arg signature.
+3. **`Repeater` delegates must be Items.** `PeersIcon` used a `Repeater` of `ShapePath`, which
+   silently produced nothing and rendered every icon blank. Replaced with a single `ShapePath` whose
+   `PathSvg` concatenates all subpaths into one `d` string.
+
+**Verified:** the module builds, loads, and renders — `docs/screenshots/peers-ui-loaded.png` shows
+the three-panel shell, the nav-rail icons, the identicon, and a **live address read from
+`chat_module`** through the QtRO replica, so the backend spine is working end to end.
+
+**Extra lesson beyond the original list:** my own tooling lied to me twice. The `qml` CLI in a nix
+shell reported "Did not load any objects" for *every* file including a trivial baseline — I only
+caught it because I sanity-checked the harness. And my first "negative control" for the parity script
+silently didn't apply its `sed`, so a passing result looked like a broken checker. **Verify the test
+before trusting its verdict**, or you bisect against noise.

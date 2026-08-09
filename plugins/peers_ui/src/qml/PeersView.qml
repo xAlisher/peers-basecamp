@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
-
-import Peers
+import "Theme.js" as Theme
 
 //
 // Peers — entry view (metadata.json "view").
@@ -21,8 +20,15 @@ Rectangle {
     implicitHeight: 720
     color: Theme.canvas
 
-    readonly property var backend: logos.module("peers_ui")
-    readonly property bool ready: logos.isViewModuleReady("peers_ui")
+    // Guarded exactly as every working local module does it. `logos` is not
+    // guaranteed to exist when the view is created, and an unguarded reference
+    // throws at creation time, which kills the whole view.
+    readonly property var backend: (typeof logos !== "undefined" && logos.module)
+                                   ? logos.module("peers_ui") : null
+    readonly property bool ready: backend !== null
+                                  && typeof logos !== "undefined"
+                                  && logos.isViewModuleReady
+                                  && logos.isViewModuleReady("peers_ui")
 
     // "chats" | "contacts" | "settings"
     property string section: "chats"
@@ -48,8 +54,9 @@ Rectangle {
 
     Connections {
         target: logos
-        function onViewModuleReadyChanged() {
-            if (root.ready)
+        // Canonical signature — every working module takes (moduleName, isReady).
+        function onViewModuleReadyChanged(moduleName, isReady) {
+            if (moduleName === "peers_ui" && isReady)
                 root.reparse();
         }
     }

@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import "Theme.js" as Theme
 
 //
 // A Peers message bubble.

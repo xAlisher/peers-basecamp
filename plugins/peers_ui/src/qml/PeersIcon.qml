@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Shapes
+import "Theme.js" as Theme
 
 //
 // Peers iconography — hand-ported Lucide glyphs drawn as VECTOR PATHS.
@@ -90,36 +91,36 @@ Item {
     readonly property var glyph: glyphs[name] !== undefined
                                  ? glyphs[name] : ({ stroke: [], fill: [] })
 
+    // A Repeater CANNOT be used here: its delegate must be an Item, and
+    // ShapePath is not one — a Repeater of ShapePaths silently produces nothing
+    // and the icon renders blank. Instead every subpath is concatenated into a
+    // single SVG `d` string; SVG path data supports multiple subpaths natively,
+    // so one static ShapePath draws the whole glyph.
+    readonly property string strokeD:
+        (glyph.stroke !== undefined ? glyph.stroke : []).join(" ")
+    readonly property string fillD:
+        (glyph.fill !== undefined ? glyph.fill : []).join(" ")
+
     Shape {
         anchors.fill: parent
         antialiasing: true
 
-        // Stroked primitives.
-        Repeater {
-            model: root.glyph.stroke !== undefined ? root.glyph.stroke : []
-            delegate: ShapePath {
-                required property string modelData
-                strokeColor: root.color
-                fillColor: "transparent"
-                strokeWidth: root.strokeWidth * root.s
-                capStyle: ShapePath.RoundCap
-                joinStyle: ShapePath.RoundJoin
-                scale: Qt.size(root.s, root.s)
-                PathSvg { path: modelData }
-            }
+        ShapePath {
+            strokeColor: root.strokeD !== "" ? root.color : "transparent"
+            fillColor: "transparent"
+            strokeWidth: root.strokeWidth * root.s
+            capStyle: ShapePath.RoundCap
+            joinStyle: ShapePath.RoundJoin
+            scale: Qt.size(root.s, root.s)
+            PathSvg { path: root.strokeD }
         }
 
-        // Filled primitives.
-        Repeater {
-            model: root.glyph.fill !== undefined ? root.glyph.fill : []
-            delegate: ShapePath {
-                required property string modelData
-                strokeColor: "transparent"
-                fillColor: root.color
-                strokeWidth: 0
-                scale: Qt.size(root.s, root.s)
-                PathSvg { path: modelData }
-            }
+        ShapePath {
+            strokeColor: "transparent"
+            fillColor: root.fillD !== "" ? root.color : "transparent"
+            strokeWidth: 0
+            scale: Qt.size(root.s, root.s)
+            PathSvg { path: root.fillD }
         }
     }
 }
