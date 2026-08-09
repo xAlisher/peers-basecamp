@@ -234,25 +234,152 @@ bool PeersUiBackend::loadMessages(const QString& convoId)
         return false;
     }
 
-    QJsonArray rows;
+    // Two passes. Control markers (reactions, pins) are FOLDED — they must never
+    // occupy a bubble — so the first pass collects them and the second attaches
+    // them to the message they target. A single pass would miss a reaction that
+    // arrives before the message it points at, which happens on catch-up.
+    struct Fold {
+        QHash<QString, int> counts;       // emoji → count
+        QSet<QString> mine;               // emoji this account reacted with
+    };
+    QHash<QString, Fold> reactions;       // target key → folded reactions
+    QString pinnedKey;
+
+    // key → what that message says, so a reply can show the text it QUOTES.
+    // The reply1: marker carries only the target key, so without this the quote
+    // box would echo the reply's own body — which is exactly the bug a
+    // screenshot caught on 2026-08-09.
+    QHash<QString, QString> textByKey;
+    QHash<QString, QString> senderByKey;
+
+    const QString me = myAddress();
+
+    auto authorOf = [&](const QVariantMap& m) {
+        // The key is hashed over (author, raw body); for our own messages the
+        // wire carries no sender, so it is this account.
+        return m.value(QStringLiteral("from_self")).toBool()
+            ? me
+            : m.value(QStringLiteral("sender")).toString();
+    };
+
     for (const QVariant& v : msgs) {
         const QVariantMap m = v.toMap();
+        const QString content = m.value(QStringLiteral("content")).toString();
+        const ContentMarkers::Kind kind = ContentMarkers::classify(content);
+
+        if (!ContentMarkers::isFolded(kind)) {
+            // Index every renderable message by its key so replies can resolve
+            // the text they quote.
+            const QString k = ContentMarkers::messageKey(authorOf(m), content);
+            const QString sender = m.value(QStringLiteral("sender")).toString();
+            textByKey.insert(k, ContentMarkers::previewText(content));
+            senderByKey.insert(k,
+                               m.value(QStringLiteral("from_self")).toBool()
+                                   ? QStringLiteral("You")
+                                   : (sender.isEmpty() ? QStringLiteral("Peer")
+                                                       : shortLabel(sender)));
+            continue;
+        }
+
+        if (kind != ContentMarkers::Kind::Reaction && kind != ContentMarkers::Kind::Pin)
+            continue;
+
+        const QJsonObject o = ContentMarkers::decodeToJson(content);
+        const QString target = o.value(QStringLiteral("targetKey")).toString();
+        if (target.isEmpty())
+            continue;
+
+        if (kind == ContentMarkers::Kind::Pin) {
+            // Last pin wins; an unpin clears it.
+            if (o.value(QStringLiteral("add")).toBool())
+                pinnedKey = target;
+            else if (pinnedKey == target)
+                pinnedKey.clear();
+            continue;
+        }
+
+        const QString emoji = o.value(QStringLiteral("emoji")).toString();
+        if (emoji.isEmpty())
+            continue;
+        Fold& f = reactions[target];
+        if (o.value(QStringLiteral("add")).toBool()) {
+            f.counts[emoji] = f.counts.value(emoji) + 1;
+            if (m.value(QStringLiteral("from_self")).toBool())
+                f.mine.insert(emoji);
+        } else {
+            const int left = f.counts.value(emoji) - 1;
+            if (left > 0)
+                f.counts[emoji] = left;
+            else
+                f.counts.remove(emoji);
+            if (m.value(QStringLiteral("from_self")).toBool())
+                f.mine.remove(emoji);
+        }
+    }
+
+    QJsonArray rows;
+    QJsonObject pinnedRow;
+
+    for (const QVariant& v : msgs) {
+        const QVariantMap m = v.toMap();
+        const QString content = m.value(QStringLiteral("content")).toString();
+        const ContentMarkers::Kind kind = ContentMarkers::classify(content);
+        if (ContentMarkers::isFolded(kind))
+            continue;   // control markers never render as a bubble
+
         const bool fromSelf = m.value(QStringLiteral("from_self")).toBool();
         const QString sender = m.value(QStringLiteral("sender")).toString();
-        const QString content = m.value(QStringLiteral("content")).toString();
 
         // Decode once, here — QML never sees a raw marker string.
         QJsonObject row = ContentMarkers::decodeToJson(content);
+
+        // The cross-device identity Peers uses in place of a message id the wire
+        // does not carry. Hashed over the RAW body, so a reply's key covers the
+        // whole "reply1:…" string, matching Android.
+        const QString key = ContentMarkers::messageKey(authorOf(m), content);
+        row.insert(QStringLiteral("key"), key);
         row.insert(QStringLiteral("fromSelf"), fromSelf);
         row.insert(QStringLiteral("timestampMs"),
                    m.value(QStringLiteral("timestamp_ms")).toDouble());
         row.insert(QStringLiteral("sender"), sender);
         row.insert(QStringLiteral("senderLabel"),
                    sender.isEmpty() ? QStringLiteral("Peer") : shortLabel(sender));
+
+        // Resolve what a reply quotes. If the quoted message isn't in this
+        // conversation's history (deleted, or before our join), say so rather
+        // than showing nothing or, worse, the reply's own text.
+        if (row.value(QStringLiteral("kind")).toString() == QLatin1String("reply")) {
+            const QString target = row.value(QStringLiteral("replyToKey")).toString();
+            row.insert(QStringLiteral("quotedText"),
+                       textByKey.value(target, QStringLiteral("Original message unavailable")));
+            row.insert(QStringLiteral("quotedSender"), senderByKey.value(target));
+        }
+
+        if (reactions.contains(key)) {
+            const Fold& f = reactions.value(key);
+            QJsonArray pills;
+            for (auto it = f.counts.begin(); it != f.counts.end(); ++it) {
+                pills.append(QJsonObject{
+                    { QStringLiteral("emoji"), it.key() },
+                    { QStringLiteral("count"), it.value() },
+                    { QStringLiteral("mine"), f.mine.contains(it.key()) },
+                });
+            }
+            if (!pills.isEmpty())
+                row.insert(QStringLiteral("reactions"), pills);
+        }
+
+        if (!pinnedKey.isEmpty() && key == pinnedKey) {
+            row.insert(QStringLiteral("pinned"), true);
+            pinnedRow = row;
+        }
+
         rows.append(row);
     }
 
     setMessagesJson(QString::fromUtf8(QJsonDocument(rows).toJson(QJsonDocument::Compact)));
+    setCurrentPinnedJson(
+        QString::fromUtf8(QJsonDocument(pinnedRow).toJson(QJsonDocument::Compact)));
     return true;
 }
 
@@ -570,35 +697,59 @@ void PeersUiBackend::leaveGroup(QString conversationId)
 // rather than failing silently. Each is tracked by an open issue and listed as
 // unimplemented in docs/PARITY.md.
 
-void PeersUiBackend::sendReply(QString c, QString content, QString replyToId)
+void PeersUiBackend::sendReply(QString conversationId, QString content, QString replyToId)
 {
-    Q_UNUSED(c) Q_UNUSED(content) Q_UNUSED(replyToId)
-    reportUnimplemented(QStringLiteral("reply"));
+    if (conversationId.isEmpty() || content.isEmpty())
+        return;
+    if (replyToId.isEmpty()) {
+        // Nothing to quote — a plain message is the honest fallback rather than
+        // emitting a malformed reply1: the peer would render as "[unreadable]".
+        sendMessage(conversationId, content);
+        return;
+    }
+    sendMessage(conversationId, ContentMarkers::encodeReply(replyToId, content));
 }
 void PeersUiBackend::forwardMessage(QString a, QString b, QString c)
 {
     Q_UNUSED(a) Q_UNUSED(b) Q_UNUSED(c)
     reportUnimplemented(QStringLiteral("forward"));
 }
-void PeersUiBackend::reactToMessage(QString a, QString b, QString c)
+void PeersUiBackend::reactToMessage(QString conversationId, QString messageId, QString emoji)
 {
-    Q_UNUSED(a) Q_UNUSED(b) Q_UNUSED(c)
-    reportUnimplemented(QStringLiteral("reactions"));
+    if (conversationId.isEmpty() || messageId.isEmpty() || emoji.isEmpty())
+        return;
+    // A reaction is a folded control message: it is sent like any other body and
+    // never renders as a bubble on either side.
+    sendMessage(conversationId, ContentMarkers::encodeReaction(true, emoji, messageId));
 }
-void PeersUiBackend::unreactToMessage(QString a, QString b, QString c)
+
+void PeersUiBackend::unreactToMessage(QString conversationId, QString messageId, QString emoji)
 {
-    Q_UNUSED(a) Q_UNUSED(b) Q_UNUSED(c)
-    reportUnimplemented(QStringLiteral("reactions"));
+    if (conversationId.isEmpty() || messageId.isEmpty() || emoji.isEmpty())
+        return;
+    sendMessage(conversationId, ContentMarkers::encodeReaction(false, emoji, messageId));
 }
-void PeersUiBackend::pinMessage(QString a, QString b)
+
+void PeersUiBackend::pinMessage(QString conversationId, QString messageId)
 {
-    Q_UNUSED(a) Q_UNUSED(b)
-    reportUnimplemented(QStringLiteral("pinning"));
+    if (conversationId.isEmpty() || messageId.isEmpty())
+        return;
+    sendMessage(conversationId, ContentMarkers::encodePin(true, messageId));
 }
-void PeersUiBackend::unpinMessage(QString a)
+
+void PeersUiBackend::unpinMessage(QString conversationId)
 {
-    Q_UNUSED(a)
-    reportUnimplemented(QStringLiteral("pinning"));
+    if (conversationId.isEmpty())
+        return;
+    // Unpin targets whatever is currently pinned in this conversation.
+    const QJsonObject pinned =
+        QJsonDocument::fromJson(currentPinnedJson().toUtf8()).object();
+    const QString key = pinned.value(QStringLiteral("key")).toString();
+    if (key.isEmpty()) {
+        report(QStringLiteral("Nothing is pinned in this conversation."));
+        return;
+    }
+    sendMessage(conversationId, ContentMarkers::encodePin(false, key));
 }
 void PeersUiBackend::deleteMessageForMe(QString a, QString b)
 {
@@ -656,10 +807,13 @@ void PeersUiBackend::removeContact(QString address)
     saveState();
     refreshContacts();
 }
-void PeersUiBackend::sendContactCard(QString a, QString b)
+void PeersUiBackend::sendContactCard(QString conversationId, QString address)
 {
-    Q_UNUSED(a) Q_UNUSED(b)
-    reportUnimplemented(QStringLiteral("shared contact cards"));
+    if (conversationId.isEmpty() || address.isEmpty())
+        return;
+    const QString label =
+        m_contacts.value(address).toObject().value(QStringLiteral("label")).toString();
+    sendMessage(conversationId, ContentMarkers::encodeContactCard(address, label));
 }
 void PeersUiBackend::setDisplayName(QString name)
 {

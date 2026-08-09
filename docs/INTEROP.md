@@ -66,11 +66,17 @@ Status: `—` not yet run · `✅` passed with evidence · `❌` failed · `⚠�
 | GIF, both directions | — | |
 | Video, both directions | — | |
 | Voice note, both directions | — | |
-| Reply renders as a quote on the peer | — | |
-| Reaction renders on the peer | — | |
-| Pin renders on the peer | — | |
+| **Reply renders as a quote on the peer** | ✅ pass | quote shows the ORIGINAL text — `20-bob-sees-reply.png` |
+| **Reaction renders on the peer** | ✅ pass | pill on the right message, folded — `21-bob-sees-reaction.png` |
+| **Pin / unpin propagate** | ✅ pass | drives `currentPinnedJson` both ways — `22-alice-sees-pin.png` (no pinned-bar UI yet) |
 | Forward | — | |
 | Ordering + offline catch-up | — | |
+
+### Known gap: the conversation preview goes blank after a control marker
+
+`chat_module`'s `preview` is the last message in the conversation, so after a reaction or pin the
+row preview empties — folded markers have no display text. Android shows the last *renderable*
+message instead. Visible in `21-bob-sees-reaction.png`.
 
 ### Known gap: the pending-invite window is not observed
 

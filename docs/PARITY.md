@@ -31,7 +31,7 @@ Android ground truth: `docs/FEATURE-INVENTORY.md` (extracted from source with `p
 | Send / receive | yes | `done` | Two-instance round-trip, 2 consecutive green runs (`scripts/run-exchange.sh`) |
 | Send state: pending / failed / retry | yes | `wip` | |
 | **Delivered / read receipts** | **no** | **`dropped`** | Android has none (`ChatScreen.tsx:3`). Do not invent them |
-| Reply / quote | yes | `todo` | Codec decodes `reply1:`; send path not wired |
+| Reply / quote | yes | `done` | Encode+decode verified cross-device; the quote resolves and shows the ORIGINAL text — `tests/interactions.mjs`, screenshot 20/21 |
 | Forward | yes | `todo` | |
 | Copy | yes | `todo` | |
 | Delete for me (local only) | yes | `todo` | Android has no remote unsend |
@@ -46,7 +46,7 @@ Android ground truth: `docs/FEATURE-INVENTORY.md` (extracted from source with `p
 | Group info / roster, pending invites | yes | `wip` | Committed count verified (2). The **pending** state was never observed — the roster only refreshes on `members_changed`/selection, so the invite window is missed. No roster UI yet |
 | Leave group (remote) | yes | `blocked` | **No core primitive.** `chat_module` 0.2.2 offers only `delete_conversation`, which is local. Next step: upstream request, or a `leave1:` marker convention matching Android |
 | Rename group / remove member / wipe | yes | `todo` | Check against the contract before promising |
-| Pinned messages + pinned bar | yes | `todo` | Codec decodes `pin1:` |
+| Pinned messages + pinned bar | yes | `wip` | Pin/unpin propagate cross-device and drive `currentPinnedJson`; **no pinned bar UI yet** |
 | Group avatar | yes | `done` | Group identicon renders in row and header — screenshot `interop-desktop/13-bob-group-roundtrip.png` |
 | Group storage opt-out (`gcfg1:`) | yes | `todo` | |
 | Desync auto-recovery / re-add request (`readd1:`) | yes | `todo` | Control marker; folded, never a bubble |
@@ -69,14 +69,14 @@ Android ground truth: `docs/FEATURE-INVENTORY.md` (extracted from source with `p
 
 | Feature | Android | Basecamp | Notes |
 |---|---|---|---|
-| Content-marker codec | yes | `wip` | **Decode implemented** for every marker, with defensive bounds; encode not yet |
+| Content-marker codec | yes | `wip` | Decode for every marker + encode for reply/reaction/pin/contact-card, verified cross-device. Media encode and malformed-input unit tests still open |
 | Photo, inline (`img1:` wire / `img1v:` local row) | yes | `todo` | |
 | Hosted media (`store2:` current, `store1:` legacy) | yes | `todo` | Every current Android send emits `store2:` |
 | GIF | yes | `todo` | Rides the hosted-media marker |
 | Video | yes | `todo` | Rides the hosted-media marker |
 | Voice notes, 2:00 cap (`voc1:` wire / `voc1v:` local row) | yes | `todo` | `MAX_RECORDING_MS = 120000` |
 | Media viewer (zoom / page / save) | yes | `todo` | |
-| Reactions (`react1:`) | yes | `todo` | Codec decodes; `messageKey` implemented |
+| Reactions (`react1:`) | yes | `done` | Pill renders on the peer with count>1 rule; folded so no raw bubble — `tests/interactions.mjs` |
 | Location (`loc1:`) | yes | `todo` | Codec decodes and range-validates |
 
 ## E5 — Settings & security

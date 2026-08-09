@@ -23,6 +23,7 @@ Item {
     readonly property string kind: msg.kind !== undefined ? msg.kind : "text"
     readonly property bool failed: msg.state === "failed"
     readonly property bool pending: msg.state === "pending"
+    readonly property var reactions: msg.reactions !== undefined ? msg.reactions : []
 
     implicitHeight: rowLayout.implicitHeight
     implicitWidth: parent ? parent.width : 0
@@ -67,23 +68,45 @@ Item {
                 spacing: 2
 
                 // Quoted message, for a reply.
+                //
+                // This shows `quotedText` — the text of the message being
+                // replied to, resolved by the backend from the reply marker's
+                // target key. It is NOT `msg.text`, which is the reply's own
+                // body; binding that here makes the quote echo the reply, which
+                // is what shipped until a screenshot caught it.
                 Rectangle {
                     visible: root.kind === "reply"
                     Layout.fillWidth: true
-                    implicitHeight: quoted.implicitHeight + Theme.space1 * 2
+                    implicitHeight: quotedCol.implicitHeight + Theme.space1 * 2
                     color: Qt.rgba(0, 0, 0, 0.22)
                     radius: 4
-                    Text {
-                        id: quoted
+
+                    ColumnLayout {
+                        id: quotedCol
                         anchors.fill: parent
                         anchors.margins: Theme.space1
-                        text: root.msg.text !== undefined ? root.msg.text : ""
-                        color: root.own ? Theme.bubbleOwnText : Theme.textDim
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.labelSize
-                        elide: Text.ElideRight
-                        maximumLineCount: 2
-                        wrapMode: Text.Wrap
+                        spacing: 0
+
+                        Text {
+                            Layout.fillWidth: true
+                            visible: text !== ""
+                            text: root.msg.quotedSender !== undefined ? root.msg.quotedSender : ""
+                            color: root.own ? Theme.bubbleOwnText : Theme.accent
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.captionSize
+                            font.weight: Font.Medium
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: root.msg.quotedText !== undefined ? root.msg.quotedText : ""
+                            color: root.own ? Theme.bubbleOwnText : Theme.textDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.labelSize
+                            elide: Text.ElideRight
+                            maximumLineCount: 2
+                            wrapMode: Text.Wrap
+                        }
                     }
                 }
 
@@ -95,6 +118,45 @@ Item {
                     font.pixelSize: Theme.bodySize
                     wrapMode: Text.Wrap
                     textFormat: Text.PlainText   // never render peer text as markup
+                }
+
+                // Reaction pills. Emoji here are CONTENT (a user picked them),
+                // not iconography — the never-emoji-as-icon rule doesn't apply.
+                Flow {
+                    Layout.fillWidth: true
+                    visible: root.reactions.length > 0
+                    spacing: Theme.space1
+
+                    Repeater {
+                        model: root.reactions
+                        delegate: Rectangle {
+                            required property var modelData
+                            height: 20
+                            width: pill.implicitWidth + Theme.space2
+                            radius: Theme.radiusPill
+                            color: root.own ? Qt.rgba(0, 0, 0, 0.22) : Theme.panel
+                            border.width: modelData.mine ? Theme.hairline : 0
+                            border.color: Theme.accent
+
+                            Row {
+                                id: pill
+                                anchors.centerIn: parent
+                                spacing: 3
+                                Text {
+                                    text: modelData.emoji
+                                    font.pixelSize: Theme.captionSize
+                                }
+                                Text {
+                                    // Peers only shows a count when it's > 1.
+                                    visible: modelData.count > 1
+                                    text: modelData.count
+                                    color: root.own ? Theme.bubbleOwnText : Theme.textDim
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.captionSize
+                                }
+                            }
+                        }
+                    }
                 }
 
                 Text {

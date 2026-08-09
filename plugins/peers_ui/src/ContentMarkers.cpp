@@ -338,6 +338,44 @@ QJsonObject decodeToJson(const QString& raw)
     return o;
 }
 
+// ── encode ──────────────────────────────────────────────────────────────────
+
+QString encodeReply(const QString& targetKey, const QString& body)
+{
+    // A key with a colon in it would make the receiver's single split ambiguous.
+    // messageKey() only ever emits 16 hex chars, so this is a guard against a
+    // caller passing something else, not an expected case.
+    QString key = targetKey;
+    key.remove(QLatin1Char(':'));
+    return QStringLiteral("reply1:%1:%2").arg(key.left(kMaxKeyLen), body);
+}
+
+QString encodeReaction(bool add, const QString& emoji, const QString& targetKey)
+{
+    QString e = emoji;
+    e.remove(QLatin1Char(':'));   // the payload is emoji:key — keep it splittable
+    QString key = targetKey;
+    key.remove(QLatin1Char(':'));
+    return QStringLiteral("react1:%1%2:%3")
+        .arg(add ? QStringLiteral("+") : QStringLiteral("-"), e.left(16), key.left(kMaxKeyLen));
+}
+
+QString encodePin(bool add, const QString& targetKey)
+{
+    QString key = targetKey;
+    key.remove(QLatin1Char(':'));
+    return QStringLiteral("pin1:%1%2")
+        .arg(add ? QStringLiteral("+") : QStringLiteral("-"), key.left(kMaxKeyLen));
+}
+
+QString encodeContactCard(const QString& address, const QString& label)
+{
+    if (label.isEmpty())
+        return QStringLiteral("addr1:%1").arg(address);
+    return QStringLiteral("addr1:peers:%1?label=%2")
+        .arg(address, QString::fromUtf8(QUrl::toPercentEncoding(clampLabel(label))));
+}
+
 QString previewText(const QString& raw)
 {
     const Kind kind = classify(raw);

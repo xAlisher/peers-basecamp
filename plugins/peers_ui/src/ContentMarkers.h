@@ -69,6 +69,23 @@ QString previewText(const QString& raw);
 // Stable lowercase name for a Kind, as it appears in decodeToJson's "kind".
 QString kindName(Kind kind);
 
+// ── encode ──────────────────────────────────────────────────────────────────
+// Each returns the raw body to hand to send_message. The grammar is Peers
+// Android's, so the phone can parse what we send (docs/CONTENT-MARKERS.md).
+
+// reply1:<key>:<body> — key identifies the quoted message, body is the reply
+// text. The body may itself contain colons, so a parser must split ONCE.
+QString encodeReply(const QString& targetKey, const QString& body);
+
+// react1:<+|-><emoji>:<key>
+QString encodeReaction(bool add, const QString& emoji, const QString& targetKey);
+
+// pin1:<+|-><key>
+QString encodePin(bool add, const QString& targetKey);
+
+// addr1:<address> — a shared contact card.
+QString encodeContactCard(const QString& address, const QString& label);
+
 // The marker class of a raw body, without decoding it.
 Kind classify(const QString& raw);
 
