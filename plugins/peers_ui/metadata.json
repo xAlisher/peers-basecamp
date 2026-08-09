@@ -10,7 +10,7 @@
   "view": "qml/PeersView.qml",
   "icon": "qml/icons/Peers_sidebar.png",
   "dependencies": [
-    "chat_module",
+    "peers_core",
     "delivery_module"
   ],
   "codegen": {
@@ -20,7 +20,7 @@
   },
   "dependency_overrides": {
     "delivery_module": {
-      "input": "chat_module",
+      "input": "peers_core",
       "file": "rust-lib/deps/delivery_module.lidl"
     }
   },

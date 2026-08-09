@@ -11,8 +11,9 @@ universal module, in a Status-desktop-style three-panel layout.
 
 ## What it is
 
-Peers for Basecamp rides the upstream Logos **`chat_module`** MLS chat core (v0.2.2) — the same
-`libchat` lineage the Android app embeds — and renders it in the Peers design language: the orange
+Peers for Basecamp rides **`peers_core`** — a fork of the Logos `chat_module` built on
+[`peers-libchat`](https://github.com/xAlisher/peers-libchat), so it speaks the same wire format as
+the Android app rather than upstream's (ADR 0007) — and renders it in the Peers design language: the orange
 `#FF5000` accent, the flush 5×5 `HexAvatar` identicon, Lucide glyph iconography, and Peers' message,
 roster and composer styling.
 
@@ -54,6 +55,7 @@ Architecture decisions, including the ones that revise the original build plan, 
 | [0003](docs/adr/0003-two-instance-desktop-interop-is-the-primary-gate.md) | Two local instances (separate `--user-dir`) are the primary interop gate |
 | [0004](docs/adr/0004-identity-import-and-phone-interop.md) | Identity import and Android interop are **upstream-constrained**; scope adjusted honestly |
 | [0005](docs/adr/0005-three-panel-layout-and-peers-skin.md) | Three-panel layout; Peers parity beats the Logos design system in every conflict |
+| [0007](docs/adr/0007-fork-the-chat-core-for-android-interop.md) | **Fork the chat core** (`peers-libchat` / `peers_core`) so desktop and Peers Android are one network |
 
 ## Documentation
 

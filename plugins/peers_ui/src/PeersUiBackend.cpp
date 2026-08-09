@@ -1,7 +1,7 @@
 #include "PeersUiBackend.h"
 
 // Generated umbrella: LogosModules (behind modules()) built from
-// metadata.json#dependencies — the Qt-typed chat_module wrapper, LogosResult
+// metadata.json#dependencies — the Qt-typed peers_core wrapper, LogosResult
 // and logos::CallError all live here.
 #include "logos_sdk.h"
 
@@ -24,6 +24,29 @@ namespace {
 // explicitly so the choice is visible rather than implied by a default.
 constexpr const char* kDefaultDeliveryPreset = "logos.test";
 constexpr const char* kChatLogLevel = "info";
+
+// The delivery entry node Peers Android pins by default
+// (src/stores/deliveryNode.ts: DEFAULT_DELIVERY_NODE). Entering the cluster
+// through the same node as the phone would make desktop<->phone delivery prompt.
+//
+// OFF BY DEFAULT, because delivery_module v0.2.0 gives no way to express it:
+//   - `kernelConf.entryNodes` is only accepted with entryLayer "kernel", which
+//     mounts the transport with NO messaging client (naming the layer explicitly
+//     does not help — the parser still rejects kernelConf);
+//   - a top-level `entryNodes` is rejected alongside the wrapper keys
+//     ("Unrecognized configuration option(s) found: entryNodes,
+//     localStoragePath") — and localStoragePath is injected by delivery_module
+//     itself, so a fully-flat config is not ours to write either.
+// With the pin set, createNode FAILS and the client has no delivery at all —
+// strictly worse than not pinning. peers_core keeps the plumbing so this becomes
+// a one-line change once delivery exposes an override; tracked in
+// peers-basecamp#60.
+//
+// Not a blocker for Android interop: both clients are Waku cluster 2 on the same
+// content-topic namespace, so traffic crosses regardless of entry node.
+//
+// Set PEERS_DELIVERY_NODE to opt in once delivery supports it.
+constexpr const char* kDefaultDeliveryNode = "";
 
 constexpr int kHealthIntervalMs = 15000;
 
@@ -66,7 +89,7 @@ PeersUiBackend::~PeersUiBackend()
 {
     if (m_moduleInitialised) {
         // Best effort — the host may already be tearing the module down.
-        modules().chat_module.shutdown();
+        modules().peers_core.shutdown();
     }
 }
 
@@ -85,12 +108,20 @@ void PeersUiBackend::initialiseModule()
 
     // ChatConfig reaches the module untyped: there is no generated struct for a
     // record in parameter position, so the wire shape IS the contract.
+    const QByteArray nodeEnv = qgetenv("PEERS_DELIVERY_NODE");
+    const QString deliveryNode = nodeEnv.isNull()
+        ? QString::fromLatin1(kDefaultDeliveryNode)
+        : QString::fromUtf8(nodeEnv);   // set-but-empty deliberately means "use the preset"
+
     const QVariantMap config{
         { QStringLiteral("delivery_preset"), QString::fromLatin1(kDefaultDeliveryPreset) },
+        { QStringLiteral("delivery_node"), deliveryNode },
         { QStringLiteral("log_level"), QString::fromLatin1(kChatLogLevel) },
     };
+    if (!deliveryNode.isEmpty())
+        setStatusDetail(QStringLiteral("pinning %1").arg(deliveryNode.section('/', 2, 2)));
 
-    const LogosResult res = modules().chat_module.init(config);
+    const LogosResult res = modules().peers_core.init(config);
     if (!res.success) {
         setChatStatus(PeersUiBackendSimpleSource::Error);
         reportFailure(QStringLiteral("Failed to initialise chat"), res.getError<QString>());
@@ -98,7 +129,7 @@ void PeersUiBackend::initialiseModule()
     }
     m_moduleInitialised = true;
 
-    setLogDir(modules().chat_module.get_log_path());
+    setLogDir(modules().peers_core.get_log_path());
 
     // Subscribe BEFORE the first snapshot, so nothing that fires in the gap is
     // dropped (invariant 2 in the header).
@@ -110,7 +141,7 @@ void PeersUiBackend::initialiseModule()
 
     // Seed status from the snapshot, in case delivery_state_changed fired
     // during init() before the listener existed.
-    const QVariantMap status = modules().chat_module.status().toMap();
+    const QVariantMap status = modules().peers_core.status().toMap();
     applyDeliveryState(status.value(QStringLiteral("delivery_state")).toString(),
                        status.value(QStringLiteral("detail")).toString());
 
@@ -123,7 +154,7 @@ void PeersUiBackend::subscribeToEvents()
         return;
     m_eventsSubscribed = true;
 
-    auto& chat = modules().chat_module;
+    auto& chat = modules().peers_core;
     chat.on(QStringLiteral("message_received"),
             [this](const QVariantList& a) { applyMessageReceived(a); });
     chat.on(QStringLiteral("message_sent"),
@@ -151,7 +182,7 @@ void PeersUiBackend::startHealthProbe()
     // one, and the app goes on looking connected until the next thing the user
     // does times out.
     connect(m_healthTimer, &QTimer::timeout, this, [this] {
-        modules().chat_module.healthAsync([this](bool answered) {
+        modules().peers_core.healthAsync([this](bool answered) {
             if (!answered && chatStatus() != PeersUiBackendSimpleSource::Error) {
                 setChatStatus(PeersUiBackendSimpleSource::Error);
                 report(QStringLiteral("Chat module stopped responding."));
@@ -167,7 +198,7 @@ void PeersUiBackend::refreshMyAddress()
 {
     if (!m_moduleInitialised)
         return;
-    const QString address = modules().chat_module.get_address();
+    const QString address = modules().peers_core.get_address();
     if (address.isEmpty())
         return;
     setMyAddress(address);
@@ -179,7 +210,7 @@ void PeersUiBackend::refreshConversations()
     if (!m_moduleInitialised)
         return;
 
-    const QVariantList convos = modules().chat_module.list_conversations();
+    const QVariantList convos = modules().peers_core.list_conversations();
 
     QJsonArray rows;
     for (const QVariant& v : convos) {
@@ -240,7 +271,7 @@ bool PeersUiBackend::loadMessages(const QString& convoId)
     // A failed read comes back as an empty list, so ask for the error too: an
     // empty thread and an unreachable module must not look alike.
     logos::CallError err;
-    const QVariantList msgs = modules().chat_module.get_messages(convoId, &err);
+    const QVariantList msgs = modules().peers_core.get_messages(convoId, &err);
     if (!err.ok()) {
         reportFailure(QStringLiteral("Could not load messages"),
                       QString::fromStdString(err.message));
@@ -482,7 +513,7 @@ void PeersUiBackend::createConversation(QString peerAddress)
         report(QStringLiteral("That is your own address."));
         return;
     }
-    const LogosResult res = modules().chat_module.create_conversation(addr);
+    const LogosResult res = modules().peers_core.create_conversation(addr);
     if (!res.success)
         reportFailure(QStringLiteral("Could not start the conversation"), res.getError<QString>());
 }
@@ -491,7 +522,7 @@ void PeersUiBackend::sendMessage(QString conversationId, QString content)
 {
     if (conversationId.isEmpty() || content.isEmpty())
         return;
-    const LogosResult res = modules().chat_module.send_message(conversationId, content);
+    const LogosResult res = modules().peers_core.send_message(conversationId, content);
     if (!res.success) {
         reportFailure(QStringLiteral("Message not sent"), res.getError<QString>());
         // Hand the text back so the composer can restore it.
@@ -518,7 +549,7 @@ void PeersUiBackend::deleteConversation(QString conversationId)
 {
     if (conversationId.isEmpty())
         return;
-    const LogosResult res = modules().chat_module.delete_conversation(conversationId);
+    const LogosResult res = modules().peers_core.delete_conversation(conversationId);
     if (!res.success) {
         reportFailure(QStringLiteral("Could not delete the conversation"),
                       res.getError<QString>());
@@ -531,7 +562,7 @@ void PeersUiBackend::deleteConversation(QString conversationId)
 void PeersUiBackend::setConversationNickname(QString conversationId, QString nickname)
 {
     const LogosResult res =
-        modules().chat_module.set_conversation_nickname(conversationId, nickname);
+        modules().peers_core.set_conversation_nickname(conversationId, nickname);
     if (!res.success)
         reportFailure(QStringLiteral("Could not rename the conversation"),
                       res.getError<QString>());
@@ -649,7 +680,7 @@ void PeersUiBackend::applyDeliveryState(const QString& state, const QString& det
 void PeersUiBackend::createGroupConversation(QString name, QString description)
 {
     const LogosResult res =
-        modules().chat_module.create_group_conversation(name.trimmed(), description.trimmed());
+        modules().peers_core.create_group_conversation(name.trimmed(), description.trimmed());
     if (!res.success)
         reportFailure(QStringLiteral("Could not create the group"), res.getError<QString>());
 }
@@ -659,7 +690,7 @@ void PeersUiBackend::addGroupMember(QString conversationId, QString peerAddress)
     const QString addr = peerAddress.trimmed();
     if (conversationId.isEmpty() || addr.isEmpty())
         return;
-    const LogosResult res = modules().chat_module.add_group_member(conversationId, addr);
+    const LogosResult res = modules().peers_core.add_group_member(conversationId, addr);
     if (!res.success) {
         reportFailure(QStringLiteral("Could not add the member"), res.getError<QString>());
         return;
@@ -690,7 +721,7 @@ void PeersUiBackend::refreshMembers()
         return;
     }
 
-    const QVariantList members = modules().chat_module.list_group_members(convoId);
+    const QVariantList members = modules().peers_core.list_group_members(convoId);
 
     QJsonArray rows;
     int committed = 0;
@@ -968,7 +999,7 @@ void PeersUiBackend::setDisplayName(QString name)
     setMyDisplayName(name);
     m_settings.insert(QStringLiteral("displayName"), name);
     saveState();
-    const LogosResult res = modules().chat_module.set_installation_name(name);
+    const LogosResult res = modules().peers_core.set_installation_name(name);
     if (!res.success)
         reportFailure(QStringLiteral("Could not set the display name"), res.getError<QString>());
 }
