@@ -22,7 +22,7 @@ const androidRepo =
   process.env.PEERS_ANDROID_REPO ??
   resolve(here, '../../../../projects/logos-chat-android');
 const androidSrc = resolve(androidRepo, 'src/components/HexAvatar.tsx');
-const ourSrc = resolve(here, '../plugins/peers_ui/src/qml/Peers/Identicon.js');
+const ourSrc = resolve(here, '../plugins/peers_ui/src/qml/Identicon.js');
 
 function fail(msg) {
   console.error(`FAIL: ${msg}`);
