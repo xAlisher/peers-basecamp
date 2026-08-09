@@ -94,3 +94,72 @@ write-ups.
   pre-commit gate, untracked-source guard, qmldir guard, port preflight.
 - **What I'd change:** copy a proven neighbour *before* writing anything original, and execute the
   artifact after every increment rather than at the end.
+
+---
+
+## Retro 2026-08-09 (2) — chat feature parity
+
+Scope: the bubble action menu, voice notes, location, media types, labels, the media
+viewer, the shared contact card, the pinned bar, and group coverage.
+
+### Wins
+
+**[win] Every screenshot I read caught something the green test did not.** Three times, on
+one batch. Incoming bubbles had an identicon and no name — the test asserted `senderLabel`
+was in the view-model, which it was; it was simply never drawn. The media viewer looked
+like it had never painted. The contact card decoded correctly and rendered as a plain text
+bubble instead of a card. All three passed their assertions. Reading pixels is not
+belt-and-braces on top of the tests; it tests a different thing.
+
+**[win] Refusing to accept "no QtMultimedia" as the end of the sentence.** The host cannot
+record, so the desktop drives ffmpeg/parecord/arecord and *measures* the result: the 40
+waveform bars come from the PCM samples and the duration from the sample count, not from
+how long the button was held. A synthesised waveform would have looked identical in a
+screenshot and meant nothing.
+
+**[win] Writing the forward test corrected me twice.** "A forward gets a new key" is false
+for your own message — the key is FNV-1a over `"<author> <body>"`, so re-sending your own
+body verbatim must collide. And the test was racing the conversation switch:
+`messages.length > 0` is true the instant you ask, because the old thread still has
+messages, so it asserted against the source message and passed for the wrong reason. Both
+were my assumptions, and only writing the assertion down exposed them.
+
+**[win] Stating contracts instead of weakening assertions.** When "forward preserves kind"
+failed on a reply, the cheap fix was to drop the check. Instead the test now says what
+actually happens — a forwarded reply arrives unwrapped as text, because its quote key means
+nothing in another thread.
+
+### Fails
+
+**[fail] A load check that passed on an empty log.** It grepped for failure strings, so a
+hung app with a 12-line log read as healthy. It reported "LOADS OK" twice while the module
+was not loading at all. A check that cannot distinguish "fine" from "produced no output" is
+not a check. Now `scripts/check-loads.sh` requires a positive marker and prints the line
+count.
+
+**[fail] Added a .cpp and never asked whether it was compiled.** `logos_module(SOURCES …)`
+is an explicit list, not a glob. The plugin linked with unresolved symbols, `nix build`
+returned 0, and the app hung with no error. Cost a full bisect — including one misleading
+step where I reverted the QML and concluded "C++" from a test that could equally have been
+broken by my own revert. Guarded in `check-all.sh`; extracted as the
+`plugin-hangs-when-cpp-missing-from-cmake` platform skill.
+
+**[fail] Ran the suite while editing the code it was testing.** Different scenarios ended up
+testing different builds. Caught it and stopped the run, but the honest cost is a wasted
+20 minutes and a suite result that meant nothing.
+
+**[fail] Called `fail(...)` as an assertion.** It is the harness's *tail* handler and takes
+an Error; passing a string printed `FAILED: undefined` and then kept going, so the run
+reported a failure and a pass. I used an API without reading it.
+
+### Process notes
+
+- **Three silent plugin-load failures now share one guard family** — qmldir, untracked
+  source, unlisted `.cpp`. None of them print anything useful; only the positive-marker
+  check catches any of them.
+- **The screenshot gate keeps paying.** Its whole value is that it fails differently from
+  the tests.
+- **What I would change:** run the load check after *every* build, not after a batch. Both
+  silent failures this session survived several increments because the check was cheap and
+  I still skipped it.
+
