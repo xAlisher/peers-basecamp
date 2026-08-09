@@ -85,7 +85,17 @@ Item {
         "userplus": { stroke: [circle(9, 8, 3.5), "M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6",
                                line(18, 9, 18, 15), line(15, 12, 21, 12)] },
         "back":     { stroke: ["M15 6l-6 6 6 6"] },
-        "lock":     { stroke: ["M7 11V7a5 5 0 0 1 10 0v4", "M5 11h14v10H5z"] }
+        "lock":     { stroke: ["M7 11V7a5 5 0 0 1 10 0v4", "M5 11h14v10H5z"] },
+
+        // ── composer / media glyphs (Lucide mic, map-pin, image, play) ──────
+        "mic":      { stroke: ["M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0z",
+                               "M19 10v2a7 7 0 0 1-14 0v-2",
+                               line(12, 19, 12, 22)] },
+        "location": { stroke: ["M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0",
+                               circle(12, 10, 3)] },
+        "image":    { stroke: ["M3 3h18v18H3z", circle(9, 9, 2),
+                               "m21 15-4.586-4.586a2 2 0 0 0-2.828 0L3 21"] },
+        "play":     { stroke: ["M6 4.5v15l13-7.5z"] }
     })
 
     readonly property var glyph: glyphs[name] !== undefined

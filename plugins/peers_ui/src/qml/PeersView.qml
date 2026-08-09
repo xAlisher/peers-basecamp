@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import QtQuick.Dialogs
 import "Theme.js" as Theme
 
 //
@@ -54,6 +55,11 @@ Rectangle {
     // "fail:<reason>". Slot returns cannot cross QtRO, so the backend reports
     // through signals and the view holds the result.
     property string lastBackup: ""
+
+    // The message the composer is replying to ({} = not replying).
+    property var replyingTo: ({})
+    // The message a forward was started from.
+    property var forwardSource: ({})
 
 
     function reparse() {
@@ -115,8 +121,12 @@ Rectangle {
         function onMembersJsonChanged() { root.reparse(); }
         function onSettingsJsonChanged() { root.reparse(); }
         function onCurrentPinnedJsonChanged() { root.reparse(); }
-        function onCurrentConversationIdChanged() { root.detailsShown = false; }
+        function onCurrentConversationIdChanged() {
+            root.detailsShown = false;
+            root.replyingTo = ({});   // a quote key means nothing in another thread
+        }
         function onError(message) { errorStrip.show(message); }
+        function onToast(message) { toast.show(message); }
         function onBackupOpened(address, conversationCount, messageCount) {
             root.lastBackup = "ok:" + conversationCount + ":" + messageCount;
         }
@@ -393,6 +403,16 @@ Rectangle {
                         width: thread.width
                         msg: modelData
                         onImageClicked: function (uri) { root.viewerSource = uri; }
+                        onMenuRequested: function (m, sx, sy) {
+                            bubbleMenu.msg = m;
+                            bubbleMenu.hasLabel = root.labelFor(m.sender) !== "";
+                            bubbleMenu.isGroup = root.backend ? root.backend.currentIsGroup : false;
+                            // Android v1 lets only the group creator pin; we cannot
+                            // determine that from the contract, so 1:1 always may and
+                            // groups may not, rather than offering an action that fails.
+                            bubbleMenu.canPin = root.backend ? !root.backend.currentIsGroup : false;
+                            bubbleMenu.openAt(sx, sy);
+                        }
                         // Folded control markers (reactions, pins, avatar
                         // broadcasts) must never occupy a bubble.
                         visible: modelData.folded !== true
@@ -459,14 +479,103 @@ Rectangle {
                     placeholder: root.backend
                                  ? "Message " + (root.backend.currentDisplayName || "")
                                  : "Message"
+                    replyingTo: root.replyingTo
+                    onCancelReply: root.replyingTo = ({})
+                    onAttach: attachDialog.open()
+                    onShareLocation: locationDialog.open()
+                    recording: root.backend ? root.backend.recording : false
+                    recordingMs: root.backend ? root.backend.recordingMs : 0
+                    onStartRecord: root.call(root.backend.startRecording())
+                    onCancelRecord: root.call(root.backend.cancelRecording())
+                    onSendRecord: root.call(
+                        root.backend.sendRecording(root.backend.currentConversationId))
                     onSend: function (body) {
-                        logos.watch(
-                            root.backend.sendMessage(root.backend.currentConversationId, body),
-                            function () {},
-                            function (err) { errorStrip.show(String(err)); });
+                        if (composer.isReplying) {
+                            root.call(root.backend.sendReply(root.backend.currentConversationId,
+                                                             body, root.replyingTo.key));
+                            root.replyingTo = ({});
+                        } else {
+                            root.call(root.backend.sendMessage(
+                                root.backend.currentConversationId, body));
+                        }
                     }
                 }
             }
+        }
+    }
+
+    function labelFor(address) {
+        if (!address)
+            return "";
+        for (var i = 0; i < root.contacts.length; i++) {
+            if (root.contacts[i].address === address)
+                return root.contacts[i].label || "";
+        }
+        return "";
+    }
+
+    ClipboardProxy { id: clipboard }
+
+    // ── per-message actions ─────────────────────────────────────────────────
+    BubbleActionMenu {
+        id: bubbleMenu
+        anchors.fill: parent
+
+        onReact: function (emoji) {
+            root.call(root.backend.reactToMessage(root.backend.currentConversationId,
+                                                  msg.key, emoji));
+        }
+        onOpenEmojiGrid: emojiGrid.open()
+        onReply: root.replyingTo = bubbleMenu.msg
+        onEditLabel: {
+            labelDialog.address = bubbleMenu.msg.sender || "";
+            labelDialog.open(root.labelFor(bubbleMenu.msg.sender));
+        }
+        onCopyAddress: {
+            if (clipboard.copyText(bubbleMenu.msg.sender))
+                toast.show("Copied");
+        }
+        onForward: { root.forwardSource = bubbleMenu.msg; forwardPicker.open(); }
+        onSaveMedia: saveDialog.open()
+        onOpenInMaps: Qt.openUrlExternally(
+            "https://www.openstreetmap.org/?mlat=" + bubbleMenu.msg.lat
+            + "&mlon=" + bubbleMenu.msg.lng)
+        onCopyMessage: {
+            // Android copies the RAW body here, not the rendered text — which is
+            // why a hosted GIF copies its marker. Matching that.
+            if (clipboard.copyText(bubbleMenu.msg.raw !== undefined
+                                   ? bubbleMenu.msg.raw : bubbleMenu.msg.text))
+                toast.show("Copied");
+        }
+        onSendMessageTo: root.call(root.backend.createConversation(bubbleMenu.msg.sender))
+        onPin: function (on) {
+            if (on)
+                root.call(root.backend.pinMessage(root.backend.currentConversationId,
+                                                  bubbleMenu.msg.key));
+            else
+                root.call(root.backend.unpinMessage(root.backend.currentConversationId));
+        }
+        onDeleteForMe: root.call(root.backend.deleteMessageForMe(
+            root.backend.currentConversationId, bubbleMenu.msg.key))
+    }
+
+    ForwardPicker {
+        id: forwardPicker
+        anchors.fill: parent
+        conversations: root.conversations
+        excludeConvoId: root.backend ? root.backend.currentConversationId : ""
+        onPicked: function (convoId) {
+            root.call(root.backend.forwardMessage(root.backend.currentConversationId,
+                                                  root.forwardSource.key, convoId));
+        }
+    }
+
+    EmojiGrid {
+        id: emojiGrid
+        anchors.fill: parent
+        onPicked: function (emoji) {
+            root.call(root.backend.reactToMessage(root.backend.currentConversationId,
+                                                  bubbleMenu.msg.key, emoji));
         }
     }
 
@@ -703,6 +812,239 @@ Rectangle {
                     function () {},
                     function (err) { errorStrip.show(String(err)); });
         newChatDialog.close();
+    }
+
+    Toast {
+        id: toast
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: Theme.space6 * 2
+    }
+
+    // Save media to a file the user picks.
+    FileDialog {
+        id: saveDialog
+        title: "Save media"
+        fileMode: FileDialog.SaveFile
+        onAccepted: root.call(root.backend.saveMedia(bubbleMenu.msg.key,
+                                                     selectedFile.toString().replace("file://", "")))
+    }
+
+    // Attach a file to send.
+    FileDialog {
+        id: attachDialog
+        title: "Send a file"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Images and media (*.png *.jpg *.jpeg *.gif *.webp *.mp4 *.webm *.m4a *.ogg)",
+                      "All files (*)"]
+        onAccepted: {
+            // A plain filesystem path, never a file:// URL — sendMedia requires it.
+            const p = selectedFile.toString().replace("file://", "");
+            root.call(root.backend.sendMedia(root.backend.currentConversationId, p, "photo"));
+        }
+    }
+
+    // Add / edit a contact label. Local only — Android says so on this screen and
+    // so do we, because a label is never broadcast.
+    Rectangle {
+        id: labelDialog
+        property string address: ""
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, 0.6)
+        visible: false
+        z: 62
+
+        function open(existing) { labelField.text = existing || ""; visible = true; labelField.forceActiveFocus(); }
+        function close() { visible = false; }
+        function commit() {
+            root.call(root.backend.setContactLabel(labelDialog.address, labelField.text.trim()));
+            labelDialog.close();
+            toast.show("Label saved");
+        }
+
+        TapHandler { onTapped: labelDialog.close() }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 420
+            implicitHeight: lblCol.implicitHeight + Theme.space6 * 2
+            height: implicitHeight
+            radius: Theme.radiusCard
+            color: Theme.panel
+            border.width: Theme.hairline
+            border.color: Theme.border
+            TapHandler { onTapped: {} }
+
+            ColumnLayout {
+                id: lblCol
+                anchors.fill: parent
+                anchors.margins: Theme.space6
+                spacing: Theme.space3
+
+                Text {
+                    text: "Label this contact"
+                    color: Theme.text
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.titleSize
+                    font.weight: Font.Medium
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: "Only you see this — it never leaves your device."
+                    color: Theme.textDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.labelSize
+                    wrapMode: Text.Wrap
+                }
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 40
+                    radius: Theme.radiusCard
+                    color: Theme.pane
+                    border.width: Theme.hairline
+                    border.color: labelField.activeFocus ? Theme.accent : Theme.border
+                    TextField {
+                        id: labelField
+                        anchors.fill: parent
+                        anchors.leftMargin: Theme.space3
+                        anchors.rightMargin: Theme.space3
+                        placeholderText: "e.g. Alice"
+                        placeholderTextColor: Theme.textFaint
+                        color: Theme.text
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.bodySize
+                        background: null
+                        Keys.onReturnPressed: function (e) { e.accepted = true; labelDialog.commit(); }
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.space2
+                    Item { Layout.fillWidth: true }
+                    Rectangle {
+                        Layout.preferredWidth: 90; Layout.preferredHeight: 34
+                        radius: Theme.radiusCard; color: "transparent"
+                        border.width: Theme.hairline; border.color: Theme.border
+                        Text { anchors.centerIn: parent; text: "Cancel"; color: Theme.textDim
+                               font.family: Theme.fontFamily; font.pixelSize: Theme.labelSize }
+                        TapHandler { onTapped: labelDialog.close() }
+                    }
+                    Rectangle {
+                        Layout.preferredWidth: 90; Layout.preferredHeight: 34
+                        radius: Theme.radiusCard; color: Theme.accent
+                        Text { anchors.centerIn: parent; text: "Save"; color: Theme.onAccent
+                               font.family: Theme.fontFamily; font.pixelSize: Theme.labelSize }
+                        TapHandler { onTapped: labelDialog.commit() }
+                    }
+                }
+            }
+        }
+    }
+
+    // Share a location. The desktop has no GPS, so the coordinates are typed —
+    // inventing a position would be worse than asking for one.
+    Rectangle {
+        id: locationDialog
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, 0.6)
+        visible: false
+        z: 62
+        function open()  { latField.text = ""; lngField.text = ""; visible = true; latField.forceActiveFocus(); }
+        function close() { visible = false; }
+        function commit() {
+            const la = parseFloat(latField.text), ln = parseFloat(lngField.text);
+            if (isNaN(la) || isNaN(ln)) { errorStrip.show("Enter a latitude and longitude."); return; }
+            root.call(root.backend.sendLocation(root.backend.currentConversationId, la, ln));
+            locationDialog.close();
+        }
+        TapHandler { onTapped: locationDialog.close() }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 420
+            implicitHeight: locCol.implicitHeight + Theme.space6 * 2
+            height: implicitHeight
+            radius: Theme.radiusCard
+            color: Theme.panel
+            border.width: Theme.hairline
+            border.color: Theme.border
+            TapHandler { onTapped: {} }
+
+            ColumnLayout {
+                id: locCol
+                anchors.fill: parent
+                anchors.margins: Theme.space6
+                spacing: Theme.space3
+
+                Text { text: "Share a location"; color: Theme.text
+                       font.family: Theme.fontFamily; font.pixelSize: Theme.titleSize
+                       font.weight: Font.Medium }
+                Text { Layout.fillWidth: true
+                       text: "This machine has no GPS, so enter the coordinates."
+                       color: Theme.textDim; font.family: Theme.fontFamily
+                       font.pixelSize: Theme.labelSize; wrapMode: Text.Wrap }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.space2
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: 40
+                        radius: Theme.radiusCard
+                        color: Theme.pane
+                        border.width: Theme.hairline
+                        border.color: latField.activeFocus ? Theme.accent : Theme.border
+                        TextField {
+                            id: latField
+                            anchors.fill: parent
+                            anchors.leftMargin: Theme.space3
+                            anchors.rightMargin: Theme.space3
+                            placeholderText: "Latitude"
+                            placeholderTextColor: Theme.textFaint
+                            color: Theme.text
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.codeSize
+                            background: null
+                            Keys.onReturnPressed: function (e) { e.accepted = true; locationDialog.commit(); }
+                        }
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: 40
+                        radius: Theme.radiusCard
+                        color: Theme.pane
+                        border.width: Theme.hairline
+                        border.color: lngField.activeFocus ? Theme.accent : Theme.border
+                        TextField {
+                            id: lngField
+                            anchors.fill: parent
+                            anchors.leftMargin: Theme.space3
+                            anchors.rightMargin: Theme.space3
+                            placeholderText: "Longitude"
+                            placeholderTextColor: Theme.textFaint
+                            color: Theme.text
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.codeSize
+                            background: null
+                            Keys.onReturnPressed: function (e) { e.accepted = true; locationDialog.commit(); }
+                        }
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.space2
+                    Item { Layout.fillWidth: true }
+                    Rectangle {
+                        Layout.preferredWidth: 90; Layout.preferredHeight: 34
+                        radius: Theme.radiusCard; color: Theme.accent
+                        Text { anchors.centerIn: parent; text: "Send"; color: Theme.onAccent
+                               font.family: Theme.fontFamily; font.pixelSize: Theme.labelSize }
+                        TapHandler { onTapped: locationDialog.commit() }
+                    }
+                }
+            }
+        }
     }
 
     // ── error strip ─────────────────────────────────────────────────────────

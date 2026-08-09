@@ -14,6 +14,7 @@
 
 class QTimer;
 class StorageClient;
+class VoiceRecorder;
 
 //
 // The Peers backend. Bridges QML (logos.module("peers_ui")) to the upstream
@@ -66,6 +67,7 @@ public:
 
     // ── media ───────────────────────────────────────────────────────────────
     void sendMedia(QString conversationId, QString localPath, QString kind) override;
+    void sendLocation(QString conversationId, double lat, double lng) override;
     void saveMedia(QString messageId, QString destPath) override;
     void startRecording() override;
     void cancelRecording() override;
@@ -170,11 +172,20 @@ private:
     // Logos-Storage client for hosted media (the store2: path). Null until
     // first use.
     StorageClient* m_storage = nullptr;
+    // Microphone capture for voice notes. Null until the first record.
+    VoiceRecorder* m_recorder = nullptr;
     // convoId+cid already being fetched, so a re-render doesn't refetch.
     QSet<QString> m_fetching;
     // cid → local decrypted file, so a fetched blob is handed to the view
     // without going near the network again.
     QHash<QString, QString> m_mediaPaths;
+    // key -> the RAW stored body of the loaded conversation's messages, so an
+    // action (forward, copy, save) can work on what was actually sent rather
+    // than on the decoded display text.
+    QHash<QString, QString> m_rawByKey;
+    // Keys hidden by "delete for me". LOCAL ONLY — Peers has no remote unsend,
+    // so this must never be presented as deleting for anyone else.
+    QJsonObject m_hiddenKeys;
 };
 
 #endif // PEERS_UI_BACKEND_H

@@ -104,6 +104,8 @@ class PeersUiBackend
     SIGNAL(backupOpened(QString address, int conversationCount, int messageCount))
     SIGNAL(backupFailed(QString reason))
     SIGNAL(qrDecoded(QString text))
+    // A short confirmation for the toast ("Copied", "Forwarded", "Saved").
+    SIGNAL(toast(QString message))
     SIGNAL(identityReset())
     // A conversation the user should be taken to (e.g. after starting one from a
     // shared contact card).
@@ -131,6 +133,8 @@ class PeersUiBackend
     // ── media ────────────────────────────────────────────────────────────────
     // localPath is a plain filesystem path, never a file:// URL.
     SLOT(void sendMedia(QString conversationId, QString localPath, QString kind))
+    // loc1:<lat>,<lng>[,<accM>] — a shared location.
+    SLOT(void sendLocation(QString conversationId, double lat, double lng))
     SLOT(void saveMedia(QString messageId, QString destPath))
     SLOT(void startRecording())
     SLOT(void cancelRecording())

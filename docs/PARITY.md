@@ -72,12 +72,12 @@ Android ground truth: `docs/FEATURE-INVENTORY.md` (extracted from source with `p
 | Content-marker codec | yes | `wip` | Decode for every marker + encode for reply/reaction/pin/contact-card, verified cross-device. Media encode and malformed-input unit tests still open |
 | Photo, inline (`img1:` wire / `img1v:` local row) | yes | `done` | Sent, decoded and rendered on the peer; PNG/JPEG dimensions read from the header (no QtGui) — `tests/media.mjs`, screenshots 30/31 |
 | Hosted media (`store2:` current, `store1:` legacy) | yes | `done` | Full Android blob format — Padmé padding, AES-256-GCM, `iv‖ct‖tag`, `POST /data`. Verified BOTH ways incl. reading a blob written by an independent implementation (`tests/hosted-media.mjs`). Needs `PEERS_STORAGE_TOKEN`; without it, disabled and said so |
-| GIF | yes | `wip` | Transport works (hosted media); animated playback in the bubble not verified |
-| Video | yes | `wip` | Transport works (hosted media); inline playback not built |
-| Voice notes, 2:00 cap (`voc1:` wire / `voc1v:` local row) | yes | `todo` | `MAX_RECORDING_MS = 120000` |
+| GIF | yes | `wip` | Transport works and the bubble animates it (`AnimatedImage`); animation not yet asserted by a test |
+| Video | yes | `wip` | Sends with its real mime and always goes hosted (never inline, which would mislabel it as an image); the bubble opens it in the desktop's player — no inline playback, the host has no QtMultimedia |
+| Voice notes, 2:00 cap (`voc1:` wire / `voc1v:` local row) | yes | `done` | Records from a real mic via an external tool (ffmpeg/parecord/arecord — the host has no QtMultimedia), measures duration and 40 waveform bars from the PCM, transcodes to mono AAC and renders on the peer — `tests/voice.mjs`, screenshots 24-26. Playback opens in the desktop's player |
 | Media viewer (zoom / page / save) | yes | `todo` | |
 | Reactions (`react1:`) | yes | `done` | Pill renders on the peer with count>1 rule; folded so no raw bubble — `tests/interactions.mjs` |
-| Location (`loc1:`) | yes | `todo` | Codec decodes and range-validates |
+| Location (`loc1:`) | yes | `done` | Send from the composer (lat/lng dialog); the bubble links out to OpenStreetMap and the menu offers Open in maps / Copy coordinates |
 
 ## E5 — Settings & security
 

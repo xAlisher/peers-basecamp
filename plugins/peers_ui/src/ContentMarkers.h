@@ -69,6 +69,11 @@ QString previewText(const QString& raw);
 // Stable lowercase name for a Kind, as it appears in decodeToJson's "kind".
 QString kindName(Kind kind);
 
+// The decoded bytes carried inline after the unit separator (voc1:/img1:), or
+// an empty array when the body carries a path or nothing. Used to materialise a
+// voice note on disk so the desktop can hand it to a player.
+QByteArray inlinePayloadBytes(const QString& raw);
+
 // ── encode ──────────────────────────────────────────────────────────────────
 // Each returns the raw body to hand to send_message. The grammar is Peers
 // Android's, so the phone can parse what we send (docs/CONTENT-MARKERS.md).

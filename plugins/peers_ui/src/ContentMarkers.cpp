@@ -104,6 +104,20 @@ bool isFolded(Kind kind)
     }
 }
 
+QByteArray inlinePayloadBytes(const QString& raw)
+{
+    const int colon = raw.indexOf(QLatin1Char(':'));
+    if (colon < 0)
+        return {};
+    const QString b64 = afterUS(raw.mid(colon + 1));
+    // A local marker (voc1v:) carries a path here, not base64; QByteArray's
+    // decoder is lenient, so guard on the marker instead of on the content.
+    if (b64.isEmpty() || raw.startsWith(QLatin1String("voc1v:"))
+        || raw.startsWith(QLatin1String("img1v:")))
+        return {};
+    return QByteArray::fromBase64(b64.toLatin1());
+}
+
 QString kindName(Kind kind)
 {
     switch (kind) {

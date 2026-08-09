@@ -162,7 +162,46 @@ async function main() {
   );
   step("unpin: clears on the peer");
 
-  console.log("\nPASS: reply, reaction, pin and unpin all render on the peer.");
+  // ── the context menu renders over a real message ────────────────────────
+  await evalq(bob, `bubbleMenu.msg = root.messages[0]`);
+  await evalq(bob, `bubbleMenu.isGroup = false`);
+  await evalq(bob, `bubbleMenu.canPin = true`);
+  await evalq(bob, `bubbleMenu.hasLabel = false`);
+  await evalq(bob, `bubbleMenu.openAt(320, 200)`);
+  await waitFor(async () => (await evalq(bob, "bubbleMenu.visible")) === true, {
+    timeout: 5000,
+    what: "the bubble action menu to open",
+  });
+  await new Promise((r) => setTimeout(r, 1200));   // let the frame settle
+  await shoot(bob, "23-bubble-action-menu.png");
+  step("context menu: opens over a message");
+  await evalq(bob, `bubbleMenu.close()`);
+
+  // ── delete for me is LOCAL: it hides here and nowhere else ──────────────
+  const before = await evalq(bob, "root.messages.length");
+  const victim = JSON.parse(await evalq(bob, "JSON.stringify(root.messages[0])"));
+  await evalq(
+    bob,
+    `root.backend.deleteMessageForMe(${JSON.stringify(convoId)}, ${JSON.stringify(victim.key)})`,
+  );
+  await waitFor(async () => (await evalq(bob, "root.messages.length")) < before, {
+    timeout: 20000,
+    what: "the deleted message to disappear locally",
+  });
+  step(`delete for me: hidden locally (${before} -> ${await evalq(bob, "root.messages.length")})`);
+
+  // …and the peer must still have it. Deleting for everyone is not a thing Peers
+  // does, and claiming otherwise would be a lie about a privacy-relevant action.
+  let stillOnAlice = false;
+  const n2 = await evalq(alice, "root.messages.length");
+  for (let i = 0; i < n2; i++) {
+    if ((await evalq(alice, `root.messages[${i}].key`)) === victim.key) stillOnAlice = true;
+  }
+  if (!stillOnAlice)
+    throw new Error("delete-for-me removed the message from the PEER — it must be local only");
+  step("delete for me: peer still has it (local only, as Peers intends)");
+
+  console.log("\nPASS: reply, reaction, pin, unpin, context menu and local delete.");
   alice.disconnect();
   bob.disconnect();
   process.exit(EXIT_OK);
