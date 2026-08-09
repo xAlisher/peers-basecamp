@@ -72,19 +72,18 @@ Status: `—` not yet run · `✅` passed with evidence · `❌` failed · `⚠�
 | Forward | — | |
 | Ordering + offline catch-up | — | |
 
-### Known gap: the conversation preview goes blank after a control marker
+### Fixed: the conversation preview no longer blanks after a control marker
 
-`chat_module`'s `preview` is the last message in the conversation, so after a reaction or pin the
-row preview empties — folded markers have no display text. Android shows the last *renderable*
-message instead. Visible in `21-bob-sees-reaction.png`.
+`chat_module`'s `preview` is simply the last message, so after a reaction or pin the row went blank
+(a folded marker has no display text). The backend now keeps the last *renderable* preview per
+conversation and reuses it, matching Android.
 
-### Known gap: the pending-invite window is not observed
+### Fixed: the pending-invite window is now observed
 
-`add_group_member` commits and delivers asynchronously, so a member should appear as **pending**
-before the group commits them. The group run never saw that state: our roster only refreshes on
-`members_changed` or on selection, so the invite window is missed and the count jumps straight to
-committed. Messages and the final roster are correct, but the pending affordance Peers shows on
-Android is not reproduced yet.
+`add_group_member` commits asynchronously, and `members_changed` only fires once the group COMMITS,
+so the in-flight state was invisible and the count jumped straight to committed. The backend now
+nudges `refreshMembers()` immediately after the invite and again at 0.5s/2s/5s. Verified:
+`bob: PENDING invite observed (1 committed, 1 pending)` — `14-bob-pending-invite.png`.
 
 ### Resolved: the "messages never arrive" symptom was a stale instance
 

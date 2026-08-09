@@ -93,23 +93,26 @@ async function main() {
     `root.backend.addGroupMember(${JSON.stringify(groupId)}, ${JSON.stringify(aliceAddress)})`,
   );
 
-  // The invite is committed and delivered asynchronously, so a pending entry is
-  // the expected intermediate state rather than a failure.
-  try {
-    await waitFor(
-      async () =>
-        (await evalq(bob, "root.backend.memberCount")) +
-          (await evalq(bob, "root.backend.pendingMemberCount")) >=
-        2,
-      { timeout: 60000, what: "alice to appear in bob's roster (committed or pending)" },
-    );
-    step(
-      `bob: roster has ${await evalq(bob, "root.backend.memberCount")} committed, ` +
-        `${await evalq(bob, "root.backend.pendingMemberCount")} pending`,
-    );
-  } catch (e) {
-    step(`  (roster did not show alice yet: ${e.message})`);
+  // The invite is committed and delivered asynchronously, so a member should be
+  // visible as PENDING before the group commits them. Poll fast — the window is
+  // short, and the backend nudges refreshMembers() right after the call
+  // precisely so it can be seen.
+  let sawPending = false;
+  const deadline = Date.now() + 45000;
+  while (Date.now() < deadline) {
+    const pending = await evalq(bob, "root.backend.pendingMemberCount");
+    const committed = await evalq(bob, "root.backend.memberCount");
+    if (pending >= 1) {
+      sawPending = true;
+      step(`bob: PENDING invite observed (${committed} committed, ${pending} pending)`);
+      await shoot(bob, "14-bob-pending-invite.png");
+      break;
+    }
+    if (committed >= 2) break;   // already committed; the window closed first
+    await new Promise((r) => setTimeout(r, 200));
   }
+  if (!sawPending)
+    step("  NOTE: pending window not observed — the commit beat the poll (not a failure)");
 
   // ── alice joins ─────────────────────────────────────────────────────────
   let joined = true;

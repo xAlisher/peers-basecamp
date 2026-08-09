@@ -195,7 +195,17 @@ void PeersUiBackend::refreshConversations()
 
         // The preview is arbitrary peer-supplied text that may carry a content
         // marker, so render what the marker means rather than its wire form.
+        //
+        // chat_module's preview is simply the LAST message, so after a reaction
+        // or pin it is a folded control marker with no display text and the row
+        // would go blank. Keep the last renderable preview instead — Android
+        // shows the last renderable message for the same reason.
         const QString rawPreview = c.value(QStringLiteral("preview")).toString();
+        QString preview = ContentMarkers::previewText(rawPreview);
+        if (preview.isEmpty())
+            preview = m_lastPreview.value(convoId);
+        else
+            m_lastPreview.insert(convoId, preview);
 
         QJsonObject row{
             { QStringLiteral("convoId"), convoId },
@@ -206,7 +216,7 @@ void PeersUiBackend::refreshConversations()
             { QStringLiteral("messageCount"), c.value(QStringLiteral("message_count")).toInt() },
             { QStringLiteral("lastActivityMs"),
               c.value(QStringLiteral("last_activity_ms")).toLongLong() },
-            { QStringLiteral("preview"), ContentMarkers::previewText(rawPreview) },
+            { QStringLiteral("preview"), preview },
             // The identicon seed: the peer address for a 1:1, the shared convo
             // id for a group — matching Peers.
             { QStringLiteral("avatarSeed"), convoId },
@@ -626,8 +636,24 @@ void PeersUiBackend::addGroupMember(QString conversationId, QString peerAddress)
     if (conversationId.isEmpty() || addr.isEmpty())
         return;
     const LogosResult res = modules().chat_module.add_group_member(conversationId, addr);
-    if (!res.success)
+    if (!res.success) {
         reportFailure(QStringLiteral("Could not add the member"), res.getError<QString>());
+        return;
+    }
+
+    // The invite is committed and delivered asynchronously, and members_changed
+    // only fires once the group COMMITS it. Without a nudge here the pending
+    // window is never seen and the roster jumps straight to committed, so the
+    // user gets no feedback that the invite is in flight.
+    if (conversationId == currentConversationId()) {
+        deferToEventLoop([this] { refreshMembers(); });
+        for (int delayMs : { 500, 2000, 5000 }) {
+            QTimer::singleShot(delayMs, this, [this, conversationId] {
+                if (conversationId == currentConversationId())
+                    refreshMembers();
+            });
+        }
+    }
 }
 
 void PeersUiBackend::refreshMembers()

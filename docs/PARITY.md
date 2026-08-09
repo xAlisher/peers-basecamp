@@ -43,7 +43,7 @@ Android ground truth: `docs/FEATURE-INVENTORY.md` (extracted from source with `p
 |---|---|---|---|
 | Create group (name + description) | yes | `done` | Verified two-instance: shared name renders on both sides — `scripts/run-exchange.sh` with `TEST=tests/group.mjs` |
 | Add members | yes | `done` | Alice joins, roster reaches 2 committed, messages flow both ways |
-| Group info / roster, pending invites | yes | `wip` | Committed count verified (2). The **pending** state was never observed — the roster only refreshes on `members_changed`/selection, so the invite window is missed. No roster UI yet |
+| Group info / roster, pending invites | yes | `wip` | Committed count (2) **and the pending window** both verified — the backend nudges `refreshMembers` after an invite so the in-flight state is visible (`14-bob-pending-invite.png`). Roster UI still to integrate |
 | Leave group (remote) | yes | `blocked` | **No core primitive.** `chat_module` 0.2.2 offers only `delete_conversation`, which is local. Next step: upstream request, or a `leave1:` marker convention matching Android |
 | Rename group / remove member / wipe | yes | `todo` | Check against the contract before promising |
 | Pinned messages + pinned bar (`pin1:`) | yes | `wip` | Pin/unpin propagate cross-device and drive `currentPinnedJson`; **no pinned bar UI yet** |

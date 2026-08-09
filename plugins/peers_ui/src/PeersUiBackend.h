@@ -155,6 +155,9 @@ private:
     QJsonObject m_settings;
     QJsonObject m_contacts;                 // address → {label, verified, avatar}
     QJsonObject m_pinnedByConvo;            // convoId → pinned message object
+    // convoId → last RENDERABLE preview, so a folded control marker (reaction,
+    // pin) as the newest message doesn't blank the conversation row.
+    QHash<QString, QString> m_lastPreview;
 
     QTimer* m_healthTimer = nullptr;
 };
