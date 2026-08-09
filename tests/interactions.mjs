@@ -269,7 +269,41 @@ async function main() {
   step(`forward: carried into another conversation (${source.kind} -> ${landed.kind}, new key)`);
   await evalq(bob, `root.backend.selectConversation(${JSON.stringify(convoId)})`);
 
-  console.log("\nPASS: reply, reaction, pin, unpin, context menu, local delete and forward.");
+  // ── a shared contact card must decode into an address, not a marker ─────
+  const cardAddress = String(await evalq(alice, "root.backend.myAddress"));
+  await evalq(bob, `root.backend.setContactLabel(${JSON.stringify(cardAddress)}, "Alice")`);
+  await evalq(
+    bob,
+    `root.backend.sendContactCard(${JSON.stringify(convoId)}, ${JSON.stringify(cardAddress)})`,
+  );
+
+  async function findContact(insp) {
+    const n = await evalq(insp, "root.messages.length");
+    for (let i = 0; i < n; i++) {
+      if ((await evalq(insp, `root.messages[${i}].kind`)) === "contact") {
+        return JSON.parse(await evalq(insp, `JSON.stringify(root.messages[${i}])`));
+      }
+    }
+    return null;
+  }
+
+  await waitFor(async () => (await findContact(alice)) !== null, {
+    timeout: 120000,
+    network: true,
+    what: "the contact card to reach alice",
+  });
+  const card = await findContact(alice);
+  if (String(card.address).toLowerCase() !== cardAddress.toLowerCase())
+    throw new Error(`the card decoded to ${card.address}, expected ${cardAddress}`);
+  if (card.label !== "Alice")
+    throw new Error(`the card lost its label: got "${card.label}"`);
+  if (String(card.text || "").includes("addr1:"))
+    throw new Error("the raw addr1: marker leaked into the rendered text");
+  step(`contact card: decoded on the peer (${card.label}, ${String(card.address).slice(0, 8)}…)`);
+  await shoot(alice, "27-alice-contact-card.png");
+
+  console.log("\nPASS: reply, reaction, pin, unpin, context menu, local delete, "
+    + "forward and a shared contact card.");
   alice.disconnect();
   bob.disconnect();
   process.exit(EXIT_OK);

@@ -36,6 +36,8 @@ Item {
     signal startChat(string address)
     signal removeContact(string address)
     signal setLabel(string address, string label)
+    // Share this contact into a conversation as an addr1: card.
+    signal shareContact(string address)
 
     // ── local state ─────────────────────────────────────────────────────────
     property string query: ""
@@ -382,6 +384,15 @@ Item {
                             TapHandler {
                                 onTapped: labelDialog.open(row.address, row.label)
                             }
+                        }
+
+                        PeersIcon {
+                            name: "send"
+                            size: 16
+                            color: shareHover.hovered ? Theme.accent : Theme.textFaint
+                            opacity: rowHover.hovered || shareHover.hovered ? 1.0 : 0.55
+                            HoverHandler { id: shareHover }
+                            TapHandler { onTapped: root.shareContact(row.address) }
                         }
 
                         PeersIcon {

@@ -48,6 +48,10 @@ Item {
     // Raised when the user taps an inline photo, so the view can open the
     // full-size viewer. The bubble itself stays presentational.
     signal imageClicked(string uri, string messageKey)
+    // A shared contact card's two actions (AddressCard.tsx): start/open the 1:1
+    // with them, or look at the address itself.
+    signal addContact(string address, string label)
+    signal viewContact(string address, string label)
 
     // Right-click, or a long press so a touchscreen behaves like the phone.
     // Coordinates are scene-relative so the menu can place itself.
@@ -222,6 +226,93 @@ Item {
                     }
                 }
 
+                // A shared contact (addr1:) is a real, visible message on both
+                // sides — identicon, the label that travelled (else the short
+                // hex), the hex, and two actions. AddressCard.tsx.
+                ColumnLayout {
+                    visible: root.kind === "contact"
+                    Layout.fillWidth: true
+                    spacing: Theme.space3
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Theme.space3
+
+                        HexAvatar {
+                            size: 40
+                            seed: String(root.msg.address || "")
+                            kind: "contact"
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+                            Text {
+                                Layout.fillWidth: true
+                                text: String(root.msg.label || "").length > 0
+                                      ? String(root.msg.label)
+                                      : String(root.msg.address || "").slice(0, 8)
+                                color: root.own ? Theme.bubbleOwnText : Theme.text
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.titleSize
+                                elide: Text.ElideRight
+                                maximumLineCount: 1
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                text: String(root.msg.address || "").slice(0, 8)
+                                color: root.own ? Qt.rgba(1, 1, 1, 0.75) : Theme.textDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.labelSize
+                                elide: Text.ElideRight
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Theme.space3
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: 40
+                            radius: Theme.radiusCard
+                            color: addHover.hovered ? Theme.accentHover : Theme.accent
+                            HoverHandler { id: addHover }
+                            TapHandler {
+                                onTapped: root.addContact(String(root.msg.address || ""),
+                                                          String(root.msg.label || ""))
+                            }
+                            Text {
+                                anchors.centerIn: parent
+                                text: "Add"
+                                color: Theme.onAccent
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.labelSize
+                            }
+                        }
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: 40
+                            radius: Theme.radiusCard
+                            color: "transparent"
+                            border.width: Theme.hairline
+                            border.color: Theme.accent
+                            HoverHandler { id: viewHover }
+                            TapHandler {
+                                onTapped: root.viewContact(String(root.msg.address || ""),
+                                                           String(root.msg.label || ""))
+                            }
+                            Text {
+                                anchors.centerIn: parent
+                                text: "View"
+                                color: viewHover.hovered ? Theme.accentHover : Theme.accent
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.labelSize
+                            }
+                        }
+                    }
+                }
+
                 Text {
                     Layout.fillWidth: true
                     // A photo's caption is its text; with no caption the label
@@ -230,6 +321,7 @@ Item {
                     // waveform and duration already say — Android's VoiceBubble
                     // shows no such line either.
                     visible: !photo.visible && !gif.visible && root.kind !== "voice"
+                             && root.kind !== "contact"
                     text: root.msg.text !== undefined ? root.msg.text : ""
                     color: root.own ? Theme.bubbleOwnText : Theme.bubblePeerText
                     font.family: Theme.fontFamily

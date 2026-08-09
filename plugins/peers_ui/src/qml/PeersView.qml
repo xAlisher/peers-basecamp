@@ -53,6 +53,9 @@ Rectangle {
     // Which message a save dialog is about. Both the bubble menu and the viewer
     // open the same dialog, so the key cannot come from either one implicitly.
     property string saveKey: ""
+    // The contact whose card is being shared, "" when the picker is forwarding a
+    // message instead. Both routes end at the same picker.
+    property string shareAddress: ""
 
     // Every image currently in the thread, as the viewer's pager wants it. Built
     // on open rather than bound, so paging is stable while messages arrive.
@@ -327,6 +330,10 @@ Rectangle {
                     onStartChat: function (address) { root.call(root.backend.createConversation(address)); root.section = "chats"; }
                     onRemoveContact: function (address) { root.call(root.backend.removeContact(address)); }
                     onSetLabel: function (address, label) { root.call(root.backend.setContactLabel(address, label)); }
+                    onShareContact: function (address) {
+                        root.shareAddress = address;
+                        forwardPicker.open();
+                    }
                 }
 
                 EmptyState {
@@ -431,6 +438,18 @@ Rectangle {
                         width: thread.width
                         msg: modelData
                         onImageClicked: function (uri, key) { root.openViewer(uri, key); }
+                        onAddContact: function (address, label) {
+                            if (label !== "")
+                                root.call(root.backend.setContactLabel(address, label));
+                            // createConversation opens the existing 1:1 when
+                            // there already is one, so "Add" is idempotent.
+                            root.call(root.backend.createConversation(address));
+                            toast.show(label !== "" ? ("Added " + label) : "Added");
+                        }
+                        onViewContact: function (address, label) {
+                            if (clipboard.copyText(address))
+                                toast.show("Address copied");
+                        }
                         onMenuRequested: function (m, sx, sy) {
                             bubbleMenu.msg = m;
                             bubbleMenu.hasLabel = root.labelFor(m.sender) !== "";
@@ -591,11 +610,25 @@ Rectangle {
         id: forwardPicker
         anchors.fill: parent
         conversations: root.conversations
-        excludeConvoId: root.backend ? root.backend.currentConversationId : ""
+        // Sharing a contact is not a forward FROM anywhere, so nothing is
+        // excluded; forwarding a message excludes the thread it is already in.
+        excludeConvoId: root.shareAddress !== "" || !root.backend
+                        ? "" : root.backend.currentConversationId
         onPicked: function (convoId) {
-            root.call(root.backend.forwardMessage(root.backend.currentConversationId,
-                                                  root.forwardSource.key, convoId));
+            if (root.shareAddress !== "") {
+                const addr = root.shareAddress;
+                root.shareAddress = "";
+                root.call(root.backend.sendContactCard(convoId, addr));
+                // Android jumps into the chat it sent the card to (#343), so the
+                // user sees it land instead of guessing whether it went.
+                root.call(root.backend.selectConversation(convoId));
+                root.section = "chats";
+            } else {
+                root.call(root.backend.forwardMessage(root.backend.currentConversationId,
+                                                      root.forwardSource.key, convoId));
+            }
         }
+        onCancelled: root.shareAddress = ""
     }
 
     EmojiGrid {

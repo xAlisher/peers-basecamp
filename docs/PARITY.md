@@ -60,7 +60,7 @@ Android ground truth: `docs/FEATURE-INVENTORY.md` (extracted from source with `p
 | My address + short label | yes | `done` | Live address read from `chat_module` and rendered; screenshot |
 | My address QR card | yes | `wip` | AddressCard renders the identicon badge, full hex and Copy; the QR itself is an honest **placeholder** — no encoder, and a wrong QR would send messages to the wrong identity |
 | QR scan | yes | `todo` | Desktop has no rear camera — needs an ADR (webcam / file / screen region) |
-| Shared contact card (`addr1:`) | yes | `todo` | Codec decodes it, including the `peers:addr?label=` form |
+| Shared contact card (`addr1:`) | yes | `done` | Share from a contact row into any conversation via the same picker forwarding uses; renders as Android's in-chat card — identicon, the label that travelled, the short hex, Add and View — and jumps into the chat it was sent to (#343). Verified on the peer in `tests/interactions.mjs`, screenshot 27 |
 | Display name | yes | `wip` | Wired to `set_installation_name` |
 | Custom avatar (`pfp1:` / `pfp1:clear`) | yes | `todo` | Codec decodes it |
 | Labels + verified badge | yes | `wip` | A label set from the bubble menu now renames the peer everywhere — bubbles, quoted replies, reaction attribution, group member rows — and mirrors onto the conversation nickname the way Android's LabelModal does. The verified badge is not built |
