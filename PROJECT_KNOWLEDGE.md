@@ -219,3 +219,23 @@ ADR 0004 before promising anything about adopting an address or phone interop.
 **Peers design source of truth is `src/theme/colors.ts`, not the Android repo's `docs/theme.md`** —
 the latter is stale and still documents an emerald `#10B981` accent. The real accent is orange
 `#FF5000`.
+
+---
+
+## Gates
+
+```bash
+./scripts/check-all.sh      # identicon equivalence · parity matrix · qmldir guard
+./scripts/run-exchange.sh                          # 1:1 round-trip (two instances)
+TEST=tests/group.mjs        ./scripts/run-exchange.sh   # group create + add + messages
+TEST=tests/interactions.mjs ./scripts/run-exchange.sh   # reply, reaction, pin, unpin
+```
+
+`check-all.sh` runs automatically on commit via `.githooks/pre-commit`
+(`git config core.hooksPath .githooks`, already set in this clone; a fresh clone
+must run it once).
+
+The scenario runners each take a few minutes: two instances have to reach Online
+on the live fleet, and the join step is genuinely flaky — exit code **2** means
+"the invite never landed", which is distinct from **1**, "an assertion failed".
+Re-run before investigating a 2.

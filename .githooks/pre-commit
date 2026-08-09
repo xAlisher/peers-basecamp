@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Run every non-build gate before a commit is allowed.
+# Installed with: git config core.hooksPath .githooks
+#
+# This exists because I twice committed and pushed with a red gate — the gate
+# script existed, I just didn't wait for it. Make the machine do it.
+exec ./scripts/check-all.sh
