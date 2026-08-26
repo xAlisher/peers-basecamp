@@ -139,10 +139,9 @@ class PeersUiBackend
     // loc1:<lat>,<lng>[,<accM>] — a shared location.
     SLOT(void sendLocation(QString conversationId, double lat, double lng))
     SLOT(void saveMedia(QString messageId, QString destPath))
-    // Open a decoded attachment in the desktop's own player/viewer. This CANNOT
-    // be done from QML: Qt.openUrlExternally is silently a no-op inside the
-    // Basecamp QML sandbox (basecamp-skills: qml-sandbox-restrictions), so the
-    // plugin process has to do it.
+    // Play decoded audio/video through the plugin's protocol-restricted local
+    // players. Generic peer attachments are never sent to a desktop opener;
+    // users must explicitly Save them instead.
     SLOT(void openMedia(QString messageId))
     // Open an http(s) URL in the desktop browser — same reason as openMedia.
     // Only http/https are accepted; a peer-supplied string must not be able to
