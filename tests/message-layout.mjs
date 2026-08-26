@@ -133,7 +133,7 @@ if (!/QStringLiteral\("ffprobe"\)[\s\S]{0,700}?"-protocol_whitelist"[\s\S]{0,200
 const downloadSource = storageClient.match(/void StorageClient::downloadDecrypt\([\s\S]*?\n}\n?$/)?.[0] ?? '';
 if (!/if \(storageToken\(\)\.isEmpty\(\) && cap\.isEmpty\(\)\)/.test(downloadSource))
   fail('hosted downloads still require a shared bearer even when a per-blob capability exists');
-if (!/if \(!storageToken\(\)\.isEmpty\(\)\)[\s\S]{0,160}?setRawHeader\("Authorization"/.test(downloadSource))
-  fail('hosted download bearer is not conditional for capability-only fetches');
+if (!/if \(!storageToken\(\)\.isEmpty\(\) && cap\.isEmpty\(\)\)[\s\S]{0,160}?setRawHeader\("Authorization"/.test(downloadSource))
+  fail('hosted download still transmits the legacy bearer with a per-blob capability');
 
 if (!process.exitCode) console.log('ok: message layout matches Android sizing and avatar/media contracts');

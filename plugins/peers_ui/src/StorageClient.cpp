@@ -223,7 +223,7 @@ void StorageClient::downloadDecrypt(const QString& cid, const QString& keyB64, c
     }
 
     QNetworkRequest req{ url };
-    if (!storageToken().isEmpty())
+    if (!storageToken().isEmpty() && cap.isEmpty())
         req.setRawHeader("Authorization", "Bearer " + storageToken().toUtf8());
 
     QNetworkReply* reply = m_net->get(req);
