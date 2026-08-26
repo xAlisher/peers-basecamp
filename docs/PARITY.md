@@ -120,8 +120,9 @@ Android ground truth: `docs/FEATURE-INVENTORY.md` (extracted from source with `p
 
 Per the build plan, none of the following is ported:
 
-- **Tor / "private mode" / route-media-over-Tor.** Note the Android toggle is already dead code
-  (`TOR_TOGGLE_READY = false`).
+- **Tor / "private mode" / route-media-over-Tor.** Android has an active fail-closed Tor media
+  route; Basecamp has not ported it and therefore does not provide equivalent network-metadata
+  privacy.
 - **BLE / Bluetooth mesh** — `NearbyScreen`, BLE stores, BLE identity, fragment transport.
 - **MeshCore / LoRa** — `MeshCoreScreen`, `MeshConfigScreen`, mesh mapping, mesh mirroring,
   channel invites, the mesh/BLE avatar ramps, and the `transport` field branching.

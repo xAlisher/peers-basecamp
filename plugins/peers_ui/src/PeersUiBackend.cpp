@@ -1033,7 +1033,7 @@ void PeersUiBackend::sendMedia(QString conversationId, QString localPath, QStrin
         return;
     }
 
-    if (!storage()->configured()) {
+    if (!storage()->uploadConfigured()) {
         report(isImage
                    ? QStringLiteral("%1 is %2 KB — too large to send inline (limit %3 KB), and "
                                     "hosted media is not configured on this install. Set "

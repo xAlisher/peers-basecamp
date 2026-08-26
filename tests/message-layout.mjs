@@ -16,6 +16,7 @@ const helperPath = resolve(root, 'plugins/peers_ui/src/qml/MessageLayout.js');
 const bubblePath = resolve(root, 'plugins/peers_ui/src/qml/MessageBubble.qml');
 const backendPath = resolve(root, 'plugins/peers_ui/src/PeersUiBackend.cpp');
 const mediaToolsPath = resolve(root, 'plugins/peers_ui/src/MediaTools.cpp');
+const storageClientPath = resolve(root, 'plugins/peers_ui/src/StorageClient.cpp');
 
 function fail(message) {
   console.error(`FAIL: ${message}`);
@@ -96,6 +97,7 @@ for (const pane of [120, 160, 200, 240]) {
 const qml = readFileSync(bubblePath, 'utf8');
 const backend = readFileSync(backendPath, 'utf8');
 const mediaTools = readFileSync(mediaToolsPath, 'utf8');
+const storageClient = readFileSync(storageClientPath, 'utf8');
 if (!qml.includes('import "MessageLayout.js" as MessageLayout')) fail('MessageBubble does not import MessageLayout');
 if (!qml.includes('MessageLayout.fitMedia')) fail('message media dimensions do not use the stable fit helper');
 if (!qml.includes('MessageLayout.downsampleWaveform')) fail('voice waveform is not bounded/downsampled');
@@ -131,5 +133,10 @@ if (!/if \(\(isImage \|\| isVideo\) && \(w < 1 \|\| h < 1\)\)[\s\S]{0,300}?Could
   fail('media send can still emit an unreadable 0x0 marker');
 if (!/QStringLiteral\("ffprobe"\)[\s\S]{0,700}?"-protocol_whitelist"[\s\S]{0,200}?"file,crypto,data"[\s\S]{0,300}?"-select_streams"[\s\S]{0,100}?"v:0"/.test(mediaTools))
   fail('media dimension probing is absent or permits network protocols');
+const downloadSource = storageClient.match(/void StorageClient::downloadDecrypt\([\s\S]*?\n}\n?$/)?.[0] ?? '';
+if (!/if \(storageToken\(\)\.isEmpty\(\) && cap\.isEmpty\(\)\)/.test(downloadSource))
+  fail('hosted downloads still require a shared bearer even when a per-blob capability exists');
+if (!/if \(!storageToken\(\)\.isEmpty\(\) && cap\.isEmpty\(\)\)[\s\S]{0,160}?setRawHeader\("Authorization"/.test(downloadSource))
+  fail('hosted download still transmits the legacy bearer with a per-blob capability');
 
 if (!process.exitCode) console.log('ok: message layout matches Android sizing and avatar/media contracts');
