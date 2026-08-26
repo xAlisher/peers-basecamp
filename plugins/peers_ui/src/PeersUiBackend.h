@@ -194,6 +194,9 @@ private:
     // cid → local decrypted file, so a fetched blob is handed to the view
     // without going near the network again.
     QHash<QString, QString> m_mediaPaths;
+    // cid → terminal fetch/decrypt error. Exposed with the decoded row so the
+    // view does not claim to be downloading forever after a known failure.
+    QHash<QString, QString> m_mediaErrors;
     // key -> the RAW stored body of the loaded conversation's messages, so an
     // action (forward, copy, save) can work on what was actually sent rather
     // than on the decoded display text.
