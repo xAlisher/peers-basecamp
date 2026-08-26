@@ -1314,11 +1314,11 @@ void PeersUiBackend::openMedia(QString messageId)
         return;
     }
 
-    // Generic non-media files go to the desktop association as a final fallback.
-    const QString exe = MediaTools::resolveBin(QStringLiteral("xdg-open"));
-    if (!exe.isEmpty() && QProcess::startDetached(exe, { path }))
-        return;
-    report(QStringLiteral("Nothing on this machine could open %1.").arg(QFileInfo(path).fileName()));
+    // MIME is supplied by the peer and therefore cannot authorize a desktop
+    // opener. A playlist disguised as a generic file could otherwise make a
+    // network-capable associated application fetch attacker-controlled URLs.
+    report(QStringLiteral("Preview is not available for %1. Save the attachment to open it.")
+               .arg(QFileInfo(path).fileName()));
 }
 
 void PeersUiBackend::saveMedia(QString messageId, QString destPath)
