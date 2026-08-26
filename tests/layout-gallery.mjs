@@ -8,9 +8,11 @@ import { pathToFileURL } from 'node:url';
 const port = Number(process.argv[2] || 5591);
 const outDir = process.env.OUT_DIR || '/extra/tmp/peers-layout';
 mkdirSync(outDir, { recursive: true });
-const imagePath = `${outDir}/portrait-fixture.svg`;
+const imagePath = `${outDir}/portrait-fixture.png`;
 const gifPath = `${outDir}/layout-fixture.gif`;
-writeFileSync(imagePath, '<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="2400"><rect width="1080" height="2400" fill="#161616"/><circle cx="540" cy="700" r="260" fill="#ff4d00"/><rect x="160" y="1200" width="760" height="500" rx="60" fill="#292929"/></svg>');
+// A tiny raster fixture avoids exercising the host's unrelated SVG decoder;
+// message metadata below remains the source of the portrait aspect ratio.
+writeFileSync(imagePath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAQAAAAICAIAAABRUclSAAAAE0lEQVR42mP878sAB0wMDLTiAACI7wFcYdlWnAAAAABJRU5ErkJggg==', 'base64'));
 // A valid one-pixel GIF exercises AnimatedImage without another checkout or
 // the delivery network.
 writeFileSync(gifPath, Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64'));

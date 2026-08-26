@@ -238,15 +238,22 @@ Item {
                             font.weight: Font.Medium
                             elide: Text.ElideRight
                         }
-                        Text {
+                        TextEdit {
+                            objectName: root.objectName + "-quote-body"
                             Layout.fillWidth: true
+                            Layout.preferredHeight: Math.min(contentHeight, font.pixelSize * 2.5)
                             text: root.msg.quotedText !== undefined ? root.msg.quotedText : ""
                             color: root.own ? Theme.bubbleOwnText : Theme.textDim
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.labelSize
-                            elide: Text.ElideRight
-                            maximumLineCount: 2
-                            wrapMode: Text.Wrap
+                            wrapMode: TextEdit.Wrap
+                            textFormat: TextEdit.PlainText
+                            readOnly: true
+                            selectByMouse: true
+                            selectionColor: Theme.accent
+                            selectedTextColor: Theme.onAccent
+                            padding: 0
+                            clip: true
                         }
                     }
                 }
@@ -277,6 +284,7 @@ Item {
                         // hostile/oversized animation in the global image cache.
                         sourceSize.width: 640
                         cache: false
+
                     }
 
                     Image {
@@ -290,10 +298,16 @@ Item {
                         asynchronous: true
                         sourceSize.width: 640
 
-                        TapHandler {
-                            enabled: photo.visible && photo.status === Image.Ready
-                            onTapped: root.imageClicked(photo.source, String(root.msg.key || ""))
-                        }
+                    }
+
+                    // One stable handler opens either the static or animated
+                    // renderer without duplicating interaction behavior.
+                    TapHandler {
+                        enabled: String(root.msg.imageUri || "") !== ""
+                                 && (root.gifMessage ? gif.status === Image.Ready
+                                                     : photo.status === Image.Ready)
+                        onTapped: root.imageClicked(String(root.msg.imageUri || ""),
+                                                    String(root.msg.key || ""))
                     }
 
                     Rectangle {
@@ -406,8 +420,10 @@ Item {
                     }
                 }
 
-                Text {
+                TextEdit {
+                    objectName: root.objectName + "-body"
                     Layout.fillWidth: true
+                    Layout.preferredHeight: contentHeight
                     // A photo's caption is its text; with no caption the label
                     // would just repeat the picture. A voice note's text is the
                     // conversation-list preview ("🎤 Voice message"), which the
@@ -422,8 +438,13 @@ Item {
                     color: root.own ? Theme.bubbleOwnText : Theme.bubblePeerText
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.bodySize
-                    wrapMode: Text.Wrap
-                    textFormat: Text.PlainText   // never render peer text as markup
+                    wrapMode: TextEdit.Wrap
+                    textFormat: TextEdit.PlainText   // never render peer text as markup
+                    readOnly: true
+                    selectByMouse: true
+                    selectionColor: Theme.accent
+                    selectedTextColor: Theme.onAccent
+                    padding: 0
                 }
 
                 // Android's compact VoiceBubble: play, bounded waveform, duration
@@ -485,11 +506,16 @@ Item {
                 // host does not ship QtMultimedia. Preserve the declared frame
                 // and use Android's centered play badge.
                 Rectangle {
+                    objectName: root.objectName + "-video-play"
                     visible: root.videoMessage
+                    enabled: String(root.msg.localPath || "") !== ""
                     Layout.preferredWidth: visible ? root.displayMediaWidth : 0
                     Layout.preferredHeight: visible ? root.displayMediaHeight : 0
                     radius: Theme.radiusCard - 2
                     color: Qt.rgba(0, 0, 0, 0.28)
+                    Accessible.role: Accessible.Button
+                    Accessible.name: "Play video"
+                    Accessible.ignored: !enabled
                     Rectangle {
                         anchors.centerIn: parent
                         width: 56
@@ -504,7 +530,7 @@ Item {
                         }
                     }
                     TapHandler {
-                        enabled: String(root.msg.localPath || "") !== ""
+                        enabled: parent.enabled
                         onTapped: root.openMedia(String(root.msg.key || ""))
                     }
                 }

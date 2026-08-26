@@ -1000,6 +1000,7 @@ void PeersUiBackend::sendMedia(QString conversationId, QString localPath, QStrin
     };
     const QString mime = kMimes.value(suffix, QStringLiteral("application/octet-stream"));
     const bool isImage = mime.startsWith(QLatin1String("image/"));
+    const bool isVideo = mime.startsWith(QLatin1String("video/"));
 
     if (kind == QLatin1String("voice")) {
         // Duration and waveform are the recorder's to supply; sending zeros is
@@ -1010,7 +1011,19 @@ void PeersUiBackend::sendMedia(QString conversationId, QString localPath, QStrin
     }
 
     int w = 0, h = 0;
-    ContentMarkers::imageSize(bytes, &w, &h);   // 0x0 is fine — the view uses the natural size
+    const bool hasEmbeddedImageSize = isImage && ContentMarkers::imageSize(bytes, &w, &h);
+    if (isVideo || (isImage && !hasEmbeddedImageSize))
+        MediaTools::probeMediaSize(localPath, &w, &h);
+    if ((isImage || isVideo) && (w < 1 || h < 1)) {
+        report(QStringLiteral("Could not determine media dimensions for %1. Nothing was sent.")
+                   .arg(info.fileName()));
+        return;
+    }
+    // Android's store2 grammar requires positive dimensions even for a generic
+    // document that has no visual size. Use the neutral minimum rather than
+    // emitting 0x0, which both peers reject as unreadable media.
+    if (!isImage && !isVideo)
+        w = h = 1;
 
     // Small images ride inline as base64. Anything bigger will not survive an
     // MLS message, so it goes to Logos Storage encrypted and only a `store2:`
@@ -1122,10 +1135,15 @@ void PeersUiBackend::openExternal(QString url)
 void PeersUiBackend::stopPlayback()
 {
     if (m_player) {
-        m_player->kill();
-        m_player->waitForFinished(1500);
-        m_player->deleteLater();
+        // Clear the member before waiting: finished() is otherwise delivered
+        // synchronously and its cleanup lambda can null m_player while this
+        // function is still dereferencing it.
+        QProcess* player = m_player;
         m_player = nullptr;
+        disconnect(player, nullptr, this, nullptr);
+        player->kill();
+        player->waitForFinished(1500);
+        player->deleteLater();
     }
     setPlayingKey(QString());
 }
@@ -1141,9 +1159,10 @@ bool PeersUiBackend::playAudio(const QString& path, const QString& key)
     // Multimedia option here.
     struct Cand { const char* exe; QStringList args; bool pcmOnly; };
     const QList<Cand> cands{
-        { "ffplay", { QStringLiteral("-nodisp"), QStringLiteral("-autoexit"),
+        { "ffplay", { QStringLiteral("-protocol_whitelist"),
+                      QStringLiteral("file,crypto,data"),
+                      QStringLiteral("-nodisp"), QStringLiteral("-autoexit"),
                       QStringLiteral("-loglevel"), QStringLiteral("error"), path }, false },
-        { "mpv",    { QStringLiteral("--no-video"), QStringLiteral("--really-quiet"), path }, false },
         { "paplay", { path }, true },
         { "aplay",  { QStringLiteral("-q"), path }, true },
     };
@@ -1165,22 +1184,75 @@ bool PeersUiBackend::playAudio(const QString& path, const QString& key)
         if (MediaTools::isBundled(exe))
             env.insert(QStringLiteral("SDL_AUDIODRIVER"), QStringLiteral("pulse,alsa"));
 
-        m_player = new QProcess(this);
-        m_player->setProcessEnvironment(env);
-        connect(m_player, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
-                [this](int, QProcess::ExitStatus) {
+        QProcess* player = new QProcess(this);
+        m_player = player;
+        player->setProcessEnvironment(env);
+        connect(player, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+                [this, player](int, QProcess::ExitStatus) {
                     // Ended on its own; clear the state so the bubble stops
                     // offering to stop it.
-                    if (m_player) {
-                        m_player->deleteLater();
+                    player->deleteLater();
+                    if (m_player == player) {
                         m_player = nullptr;
+                        setPlayingKey(QString());
                     }
-                    setPlayingKey(QString());
                 });
-        m_player->start(exe, c.args);
-        if (!m_player->waitForStarted(3000)) {
-            m_player->deleteLater();
-            m_player = nullptr;
+        player->start(exe, c.args);
+        if (!player->waitForStarted(3000)
+                || m_player != player
+                || player->state() == QProcess::NotRunning) {
+            if (m_player == player) {
+                disconnect(player, nullptr, this, nullptr);
+                m_player = nullptr;
+                player->deleteLater();
+            }
+            continue;
+        }
+        setPlayingKey(key);
+        return true;
+    }
+    return false;
+}
+
+bool PeersUiBackend::playVideo(const QString& path, const QString& key)
+{
+    // Qt Multimedia is absent from Basecamp. Launch a player process ourselves
+    // instead of relying first on xdg-open: decrypted hosted files deliberately
+    // have no extension, while ffplay inspects their contents correctly.
+    struct Cand { const char* exe; QStringList args; };
+    const QList<Cand> cands{
+        { "ffplay", { QStringLiteral("-protocol_whitelist"),
+                      QStringLiteral("file,crypto,data"),
+                      QStringLiteral("-autoexit"), QStringLiteral("-loglevel"),
+                      QStringLiteral("error"), QStringLiteral("-window_title"),
+                      QStringLiteral("Peers video"), path } },
+    };
+
+    for (const Cand& c : cands) {
+        const QString exe = MediaTools::resolveBin(QLatin1String(c.exe));
+        if (exe.isEmpty())
+            continue;
+
+        QProcess* player = new QProcess(this);
+        m_player = player;
+        player->setProcessEnvironment(MediaTools::cleanSpawnEnv());
+        connect(player, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+                [this, player](int, QProcess::ExitStatus) {
+                    player->deleteLater();
+                    if (m_player == player) {
+                        m_player = nullptr;
+                        setPlayingKey(QString());
+                    }
+                });
+        player->start(exe, c.args);
+        if (!player->waitForStarted(3000)
+                || m_player != player
+                || player->state() == QProcess::NotRunning) {
+            if (m_player == player) {
+                disconnect(player, nullptr, this, nullptr);
+                m_player = nullptr;
+                player->deleteLater();
+            }
             continue;
         }
         setPlayingKey(key);
@@ -1218,20 +1290,31 @@ void PeersUiBackend::openMedia(QString messageId)
     }
 
     const QJsonObject o = ContentMarkers::decodeToJson(raw);
+    const QString mime = o.value(QStringLiteral("mime")).toString();
     const bool isAudio = kind == QLatin1String("voice")
-        || o.value(QStringLiteral("mime")).toString().startsWith(QLatin1String("audio/"));
+        || mime.startsWith(QLatin1String("audio/"));
+    const bool isVideo = mime.startsWith(QLatin1String("video/"));
 
     if (isAudio) {
         stopPlayback();
         if (playAudio(path, messageId))
             return;
         report(QStringLiteral("Could not start audio playback. This module bundles ffplay; if "
-                              "that failed, mpv or paplay on PATH also work."));
+                              "that failed, paplay or aplay can play local WAV files."));
         return;
     }
 
-    // Video genuinely wants a window, and the host has no surface to give it, so
-    // this one does go to the desktop's player.
+    if (isVideo) {
+        stopPlayback();
+        if (!playVideo(path, messageId))
+            report(QStringLiteral("No supported video player found"));
+        // Never hand peer-controlled media to the desktop opener: playlists
+        // can contain remote references. playVideo's ffplay invocation permits
+        // only local/data protocols.
+        return;
+    }
+
+    // Generic non-media files go to the desktop association as a final fallback.
     const QString exe = MediaTools::resolveBin(QStringLiteral("xdg-open"));
     if (!exe.isEmpty() && QProcess::startDetached(exe, { path }))
         return;
