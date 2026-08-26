@@ -28,16 +28,15 @@ class QNetworkAccessManager;
 //
 //     iv(12) || AES-256-GCM( Padmé-padded plaintext ) || tag(16)
 //
-// CONFIGURATION. Android bakes the endpoint and bearer token in at build time
-// because a shared token cannot be a user-facing setting. We take the same view:
-// they come from the environment, never from the repo, and never from anything
-// a peer can influence.
+// CONFIGURATION. The token is a legacy migration credential for uploads and
+// capless downloads. It must not be embedded in an LGX or installation. New
+// downloads use their per-blob capability without transmitting this bearer.
 //
 //     PEERS_STORAGE_BASE   default https://msg.logos.live/s/api/storage/v1
 //     PEERS_STORAGE_TOKEN  default empty
 //
-// With no token, hosted media is DISABLED — exactly as a default Android build
-// no-ops it — and the caller must say so rather than appear to send something.
+// With no token, uploads and legacy capless downloads fail closed. A validated
+// capability-bearing marker may still be fetched.
 //
 class StorageClient : public QObject
 {
@@ -47,8 +46,8 @@ public:
     explicit StorageClient(QObject* parent = nullptr);
     ~StorageClient() override;
 
-    // Whether hosted media can be used at all (i.e. a token is configured).
-    bool configured() const;
+    // Whether the legacy upload path is configured.
+    bool uploadConfigured() const;
     QString baseUrl() const;
 
     struct Uploaded {

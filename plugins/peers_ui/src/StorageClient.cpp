@@ -52,7 +52,7 @@ StorageClient::StorageClient(QObject* parent)
 
 StorageClient::~StorageClient() = default;
 
-bool StorageClient::configured() const { return !storageToken().isEmpty(); }
+bool StorageClient::uploadConfigured() const { return !storageToken().isEmpty(); }
 QString StorageClient::baseUrl() const { return storageBase(); }
 
 // ── validation (StorageRef.kt:38-53) ────────────────────────────────────────
@@ -101,7 +101,7 @@ QString StorageClient::cacheFileFor(const QString& cid)
 
 void StorageClient::uploadEncrypted(const QByteArray& bytes, UploadCb cb)
 {
-    if (!configured()) {
+    if (!uploadConfigured()) {
         cb(false, {},
            QStringLiteral("Hosted media is not configured on this install "
                           "(set PEERS_STORAGE_TOKEN). The file was not sent."));
@@ -207,10 +207,10 @@ void StorageClient::downloadDecrypt(const QString& cid, const QString& keyB64, c
         }
     }
 
-    if (!configured()) {
+    if (storageToken().isEmpty() && cap.isEmpty()) {
         cb(false, QString(),
-           QStringLiteral("Hosted media is not configured on this install "
-                          "(set PEERS_STORAGE_TOKEN)."));
+           QStringLiteral("That hosted-media reference has no download capability, "
+                          "and this install has no legacy storage credential."));
         return;
     }
 
@@ -223,7 +223,8 @@ void StorageClient::downloadDecrypt(const QString& cid, const QString& keyB64, c
     }
 
     QNetworkRequest req{ url };
-    req.setRawHeader("Authorization", "Bearer " + storageToken().toUtf8());
+    if (!storageToken().isEmpty())
+        req.setRawHeader("Authorization", "Bearer " + storageToken().toUtf8());
 
     QNetworkReply* reply = m_net->get(req);
     const QByteArray key = QByteArray::fromBase64(keyB64.toLatin1());
