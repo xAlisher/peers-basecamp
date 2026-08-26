@@ -18,7 +18,7 @@ This branch starts the first safe slice: when a valid per-blob capability is pre
 
 ## Desktop privacy boundary
 
-Content confidentiality matches Android because storage sees only padded ciphertext and the key remains inside MLS. Network-metadata privacy does not yet match Android Private mode: absent a desktop Tor/Mix route, the gateway sees the desktop IP, timing, padded size, CID, and request linkage. That gap must remain explicit; token removal alone does not make media anonymous.
+Content confidentiality matches Android because storage sees only padded ciphertext: the AES key is distributed through MLS and never sent to storage. The read capability is also distributed through MLS but is necessarily presented to the gateway when fetching ciphertext. Network-metadata privacy does not yet match Android Private mode: absent a desktop Tor/Mix route, the gateway sees the desktop IP, timing, padded size, CID, capability, and request linkage. That gap must remain explicit; token removal alone does not make media anonymous.
 
 Group limitations are protocol-level and shared by both clients: members who already obtained a key/cap cannot be made to forget it, remote deletion is best effort, and the same object must not be reused across conversations because CID reuse creates correlation.
 
