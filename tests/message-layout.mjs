@@ -122,6 +122,9 @@ if (!/isVideo[\s\S]{0,500}?playVideo\(path, messageId\)/.test(backend))
   fail('video attachments do not route through managed playback');
 if (!/if \(isVideo\)[\s\S]{0,500}?No supported video player found[\s\S]{0,500}?return;/.test(backend))
   fail('video playback failure can fall through to an unrestricted external opener');
+const openMediaSource = backend.match(/void PeersUiBackend::openMedia\([\s\S]*?\n}\n\nvoid PeersUiBackend::saveMedia/)?.[0] ?? '';
+if (/xdg-open|startDetached/.test(openMediaSource))
+  fail('peer-controlled attachment can reach an unrestricted desktop opener');
 if (!/const bool isVideo[\s\S]{0,1200}?MediaTools::probeMediaSize\(localPath, &w, &h\)/.test(backend))
   fail('video send does not probe real dimensions before encoding store2');
 if (!/if \(\(isImage \|\| isVideo\) && \(w < 1 \|\| h < 1\)\)[\s\S]{0,300}?Could not determine media dimensions[\s\S]{0,200}?return;/.test(backend))
