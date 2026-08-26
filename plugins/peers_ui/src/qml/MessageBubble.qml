@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import "Theme.js" as Theme
+import "MessageLayout.js" as MessageLayout
 
 //
 // A Peers message bubble.
@@ -28,6 +29,10 @@ Item {
     readonly property string kind: msg.kind !== undefined ? msg.kind : "text"
     readonly property bool failed: msg.state === "failed"
     readonly property bool pending: msg.state === "pending"
+    readonly property string statusText: pending ? "sending\u2026"
+                                                 : (failed ? "failed" : Qt.formatDateTime(
+                                                        new Date(msg.timestampMs !== undefined
+                                                                 ? msg.timestampMs : 0), "HH:mm"))
     readonly property var reactions: msg.reactions !== undefined ? msg.reactions : []
     // The amplitude bars measured when the note was recorded (voice notes only).
     readonly property var waveform: msg.waveform !== undefined ? msg.waveform : []
@@ -36,6 +41,53 @@ Item {
     // A label was actually set — otherwise senderLabel IS the hex and printing
     // both would say the same thing twice.
     readonly property bool senderNamed: senderLabel !== "" && senderLabel !== senderHex
+    readonly property real maxBubbleWidth: Math.floor(width * MessageLayout.bubbleMaxRatio)
+    readonly property var mediaSize: MessageLayout.fitMedia(msg.width || 0, msg.height || 0)
+    readonly property real displayMediaWidth: Math.min(mediaSize.width,
+                                                       Math.max(1, maxBubbleWidth - Theme.space1))
+    readonly property real displayMediaHeight: Math.max(1,
+        Math.round(mediaSize.height * displayMediaWidth / Math.max(1, mediaSize.width)))
+    readonly property real maxVoiceWaveWidth: MessageLayout.voiceWaveWidth(width)
+    readonly property var voiceBars: MessageLayout.downsampleWaveform(waveform,
+                                                                      maxVoiceWaveWidth)
+    readonly property real voiceWaveWidth: Math.min(maxVoiceWaveWidth,
+        Math.max(Math.min(MessageLayout.voiceMinWave, maxVoiceWaveWidth),
+                 voiceBars.length * (MessageLayout.voiceBarWidth
+                                     + MessageLayout.voiceBarGap)
+                 - MessageLayout.voiceBarGap))
+    readonly property bool imageMessage: kind === "photo"
+                                         || (kind === "media"
+                                             && String(msg.mime || "").indexOf("image/") === 0)
+    readonly property bool gifMessage: imageMessage && String(msg.mime || "") === "image/gif"
+    readonly property bool videoMessage: kind === "media"
+                                         && String(msg.mime || "").indexOf("video/") === 0
+    readonly property bool mediaFrame: imageMessage || videoMessage
+    readonly property string mediaError: String(msg.mediaError || "")
+    readonly property bool compactVoice: maxBubbleWidth < 180
+    readonly property bool voiceReady: String(msg.localPath || "") !== ""
+    readonly property real desiredBubbleWidth: mediaFrame
+        ? Math.min(maxBubbleWidth, displayMediaWidth + Theme.space1)
+        : (kind === "voice"
+           ? Math.min(maxBubbleWidth, voiceWaveWidth + MessageLayout.voiceReserved)
+           : (kind === "reply" ? Math.min(maxBubbleWidth, 240)
+              : (kind === "contact" ? Math.min(maxBubbleWidth, 260)
+                 : (kind === "location" ? Math.min(maxBubbleWidth, 260)
+                    : (kind === "media" ? Math.min(maxBubbleWidth, 220)
+                       : Math.min(maxBubbleWidth,
+                                  Math.max(48, bodyMetrics.advanceWidth + Theme.space3 * 2)))))))
+
+    TextMetrics {
+        id: bodyMetrics
+        font.family: Theme.fontFamily
+        font.pixelSize: Theme.bodySize
+        text: root.msg.text !== undefined ? String(root.msg.text) : ""
+    }
+    TextMetrics {
+        id: statusMetrics
+        font.family: Theme.fontFamily
+        font.pixelSize: Theme.captionSize
+        text: root.statusText
+    }
 
     // The label is user-supplied text going into a StyledText, so it has to be
     // escaped — a peer's label is not markup.
@@ -75,15 +127,6 @@ Item {
         spacing: Theme.space2
         layoutDirection: root.own ? Qt.RightToLeft : Qt.LeftToRight
 
-        // Sender identicon, peer messages only — own messages need no
-        // attribution.
-        HexAvatar {
-            visible: !root.own
-            size: 28
-            seed: root.msg.sender !== undefined ? root.msg.sender : ""
-            kind: "contact"
-            Layout.alignment: Qt.AlignBottom
-        }
 
         // Android opens this menu on a 350 ms long-press; desktop adds right-click.
         TapHandler {
@@ -109,31 +152,46 @@ Item {
         // has no label. In a busy group an unattributed bubble is unreadable.
         ColumnLayout {
             spacing: 2
-            Layout.maximumWidth: rowLayout.width * Theme.bubbleMaxWidthRatio
+            Layout.preferredWidth: Math.max(root.desiredBubbleWidth, statusMetrics.advanceWidth)
+            Layout.maximumWidth: Math.max(root.maxBubbleWidth, statusMetrics.advanceWidth)
 
-            Text {
+            RowLayout {
                 visible: !root.own && root.senderHex !== ""
                 Layout.fillWidth: true
-                textFormat: Text.StyledText
-                text: root.senderNamed
-                      ? ("<font color=\"" + Theme.text + "\">" + root.escapeHtml(root.senderLabel)
-                         + "</font> <font color=\"" + Theme.textDim + "\">" + root.senderHex
-                         + "</font>")
-                      : ("<font color=\"" + Theme.textDim + "\">" + root.senderHex + "</font>")
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.captionSize
-                elide: Text.ElideRight
-                maximumLineCount: 1
+                spacing: Theme.space1
+
+                HexAvatar {
+                    id: attributionAvatar
+                    size: 16
+                    seed: root.msg.sender !== undefined ? root.msg.sender : ""
+                    kind: "contact"
+                }
+                Text {
+                    Layout.fillWidth: true
+                    textFormat: Text.StyledText
+                    text: root.senderNamed
+                          ? ("<font color=\"" + Theme.text + "\">" + root.escapeHtml(root.senderLabel)
+                             + "</font> <font color=\"" + Theme.textDim + "\">" + root.senderHex
+                             + "</font>")
+                          : ("<font color=\"" + Theme.text + "\">" + root.senderHex + "</font>")
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.captionSize
+                    elide: Text.ElideRight
+                    maximumLineCount: 1
+                }
             }
 
         Rectangle {
             id: bubble
-            Layout.maximumWidth: rowLayout.width * Theme.bubbleMaxWidthRatio
-            Layout.preferredWidth: content.implicitWidth + Theme.space3 * 2
-            implicitHeight: content.implicitHeight + Theme.space2 * 2
+            Layout.maximumWidth: root.maxBubbleWidth
+            Layout.preferredWidth: root.desiredBubbleWidth
+            Layout.alignment: root.own ? Qt.AlignRight : Qt.AlignLeft
+            implicitHeight: content.implicitHeight
+                            + (root.mediaFrame ? 4 : Theme.space2 * 2)
             Layout.preferredHeight: implicitHeight
 
             radius: Theme.radiusBubble
+            clip: true
             color: root.own ? Theme.bubbleOwn : Theme.bubblePeer
             // A failed send is outlined, not recoloured — the text must stay
             // readable while the user decides whether to resend.
@@ -145,9 +203,9 @@ Item {
             ColumnLayout {
                 id: content
                 anchors.fill: parent
-                anchors.margins: Theme.space2
-                anchors.leftMargin: Theme.space3
-                anchors.rightMargin: Theme.space3
+                anchors.margins: root.mediaFrame ? 2 : Theme.space2
+                anchors.leftMargin: root.mediaFrame ? 2 : Theme.space3
+                anchors.rightMargin: root.mediaFrame ? 2 : Theme.space3
                 spacing: 2
 
                 // Quoted message, for a reply.
@@ -198,41 +256,66 @@ Item {
                 // An animated GIF needs AnimatedImage; a plain Image shows only
                 // the first frame. QtMultimedia is not available in the host, so
                 // video and voice open externally instead (below).
-                AnimatedImage {
-                    id: gif
-                    visible: root.msg.mime !== undefined
-                             && String(root.msg.mime) === "image/gif"
-                             && source !== ""
-                    source: root.msg.imageUri !== undefined ? root.msg.imageUri : ""
-                    Layout.preferredWidth: Math.min(implicitWidth, 320)
-                    Layout.preferredHeight: implicitWidth > 0
-                                            ? Layout.preferredWidth * (implicitHeight / implicitWidth)
-                                            : 0
-                    fillMode: Image.PreserveAspectFit
-                    playing: true
-                    cache: true
-                }
+                // One stable frame owns the image, GIF and status overlay. Making
+                // these siblings in the ColumnLayout doubles the row height while
+                // a decoder is loading.
+                Item {
+                    visible: root.imageMessage
+                    Layout.preferredWidth: visible ? root.displayMediaWidth : 0
+                    Layout.preferredHeight: visible ? root.displayMediaHeight : 0
+                    Layout.maximumWidth: visible ? root.displayMediaWidth : 0
+                    Layout.maximumHeight: visible ? root.displayMediaHeight : 0
 
-                Image {
-                    id: photo
-                    // Inline photos and fetched hosted media render the same way;
-                    // hosted media only has a source once the fetch completes.
-                    visible: (root.kind === "photo" || root.kind === "media")
-                             && source !== "" && !gif.visible
-                    source: root.msg.imageUri !== undefined ? root.msg.imageUri : ""
-                    Layout.preferredWidth: Math.min(implicitWidth, 320)
-                    Layout.preferredHeight: implicitWidth > 0
-                                            ? Layout.preferredWidth * (implicitHeight / implicitWidth)
-                                            : 0
-                    fillMode: Image.PreserveAspectFit
-                    asynchronous: true
-                    // A peer-supplied image must not be able to blow up memory
-                    // through its declared dimensions.
-                    sourceSize.width: 640
+                    AnimatedImage {
+                        id: gif
+                        anchors.fill: parent
+                        visible: root.gifMessage && String(source) !== ""
+                        source: root.msg.imageUri !== undefined ? root.msg.imageUri : ""
+                        fillMode: Image.PreserveAspectCrop
+                        playing: true
+                        // Bound decoded frame dimensions and avoid retaining every
+                        // hostile/oversized animation in the global image cache.
+                        sourceSize.width: 640
+                        cache: false
+                    }
 
-                    TapHandler {
-                        enabled: photo.visible
-                        onTapped: root.imageClicked(photo.source, String(root.msg.key || ""))
+                    Image {
+                        id: photo
+                        anchors.fill: parent
+                        // Inline photos and fetched hosted media render the same way;
+                        // hosted media only has a source once the fetch completes.
+                        visible: !root.gifMessage && String(source) !== ""
+                        source: root.msg.imageUri !== undefined ? root.msg.imageUri : ""
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        sourceSize.width: 640
+
+                        TapHandler {
+                            enabled: photo.visible && photo.status === Image.Ready
+                            onTapped: root.imageClicked(photo.source, String(root.msg.key || ""))
+                        }
+                    }
+
+                    Rectangle {
+                        readonly property bool decodeFailed:
+                            (root.gifMessage && gif.status === Image.Error)
+                            || (!root.gifMessage && photo.status === Image.Error)
+                        readonly property bool decoderBusy:
+                            (root.gifMessage && gif.status === Image.Loading)
+                            || (!root.gifMessage && photo.status === Image.Loading)
+                        anchors.fill: parent
+                        visible: String(root.msg.imageUri || "") === ""
+                                 || root.mediaError !== "" || decodeFailed || decoderBusy
+                        radius: Theme.radiusCard - 2
+                        color: Qt.rgba(0, 0, 0, 0.18)
+                        Text {
+                            anchors.centerIn: parent
+                            text: root.mediaError !== "" || parent.decodeFailed
+                                  ? "Media unavailable" : "Downloading\u2026"
+                            color: root.own ? Qt.rgba(1, 1, 1, 0.75) : Theme.textDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.captionSize
+                        }
                     }
                 }
 
@@ -330,8 +413,11 @@ Item {
                     // conversation-list preview ("🎤 Voice message"), which the
                     // waveform and duration already say — Android's VoiceBubble
                     // shows no such line either.
-                    visible: !photo.visible && !gif.visible && root.kind !== "voice"
-                             && root.kind !== "contact"
+                    // Generic hosted files have no richer delegate; keep their
+                    // caption/fallback visible rather than emitting an empty bubble.
+                    visible: root.kind === "text" || root.kind === "reply"
+                             || (root.kind === "media"
+                                 && !root.imageMessage && !root.videoMessage)
                     text: root.msg.text !== undefined ? root.msg.text : ""
                     color: root.own ? Theme.bubbleOwnText : Theme.bubblePeerText
                     font.family: Theme.fontFamily
@@ -340,89 +426,110 @@ Item {
                     textFormat: Text.PlainText   // never render peer text as markup
                 }
 
-                // The recorded waveform, exactly as Android draws it: the bars
-                // measured at capture time, not a decorative animation. Bars are
-                // 0..100 with the loudest at 100 (VoiceBubble.tsx).
-                Row {
-                    visible: root.kind === "voice" && root.waveform.length > 0
-                    spacing: 2
-                    Repeater {
-                        model: root.waveform
-                        delegate: Rectangle {
-                            required property int modelData
-                            width: 3
-                            radius: 1.5
-                            // A floor of 2px so a silent bar is still a bar and
-                            // the strip does not develop gaps.
-                            height: Math.max(2, Math.round(modelData / 100 * 28))
-                            anchors.verticalCenter: parent.verticalCenter
-                            color: root.own ? Theme.bubbleOwnText : Theme.accent
-                            opacity: root.own ? 0.85 : 0.9
+                // Android's compact VoiceBubble: play, bounded waveform, duration
+                // in one row. Long recordings are downsampled rather than pushing
+                // the bubble off-screen; short notes stay compact.
+                RowLayout {
+                    visible: root.kind === "voice"
+                    Layout.preferredWidth: root.desiredBubbleWidth - Theme.space3 * 2
+                    Layout.preferredHeight: 32
+                    spacing: root.compactVoice ? Theme.space1 : Theme.space2
+
+                    Item {
+                        Layout.preferredWidth: root.compactVoice ? 24 : 32
+                        Layout.preferredHeight: 32
+                        Accessible.role: Accessible.Button
+                        Accessible.name: root.playing ? "Stop voice message" : "Play voice message"
+                        Accessible.ignored: !root.voiceReady
+                        PeersIcon {
+                            anchors.centerIn: parent
+                            name: root.playing ? "close" : "play"
+                            size: 16
+                            color: root.own ? Theme.bubbleOwnText : Theme.text
+                            opacity: root.voiceReady ? 1 : 0.45
                         }
+                        TapHandler {
+                            enabled: root.voiceReady
+                            onTapped: root.openMedia(String(root.msg.key || ""))
+                        }
+                    }
+                    Row {
+                        Layout.preferredWidth: root.voiceWaveWidth
+                        Layout.preferredHeight: 24
+                        spacing: MessageLayout.voiceBarGap
+                        clip: true
+                        Repeater {
+                            model: root.voiceBars
+                            delegate: Rectangle {
+                                required property real modelData
+                                width: MessageLayout.voiceBarWidth
+                                radius: 1
+                                height: Math.max(3,
+                                                 Math.round(Math.min(100, modelData)
+                                                            / 100 * 22))
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: root.own ? Theme.bubbleOwnText : Theme.text
+                                opacity: 0.85
+                            }
+                        }
+                    }
+                    Text {
+                        text: root.mmss(root.msg.durationMs || 0)
+                        color: root.own ? Theme.bubbleOwnText : Theme.text
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.captionSize
                     }
                 }
 
-                // Video and voice: the host has no QtMultimedia, so offer to open
-                // the decrypted file in the desktop's own player rather than
-                // pretending to play it inline.
+                // Video playback remains in the backend because the Basecamp
+                // host does not ship QtMultimedia. Preserve the declared frame
+                // and use Android's centered play badge.
                 Rectangle {
-                    Layout.fillWidth: true
-                    visible: (root.kind === "voice"
-                              || (root.kind === "media"
-                                  && String(root.msg.mime || "").indexOf("video") === 0))
-                             && String(root.msg.localPath || "") !== ""
-                    implicitHeight: 36
-                    radius: Theme.radiusCard
-                    color: root.own ? Qt.rgba(0, 0, 0, 0.22) : Theme.panel
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: Theme.space2
-                        anchors.rightMargin: Theme.space2
-                        spacing: Theme.space2
+                    visible: root.videoMessage
+                    Layout.preferredWidth: visible ? root.displayMediaWidth : 0
+                    Layout.preferredHeight: visible ? root.displayMediaHeight : 0
+                    radius: Theme.radiusCard - 2
+                    color: Qt.rgba(0, 0, 0, 0.28)
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 56
+                        height: 56
+                        radius: 28
+                        color: Qt.rgba(0, 0, 0, 0.45)
                         PeersIcon {
-                            name: root.playing ? "close" : "play"
-                            size: 14
-                            color: root.own ? Theme.bubbleOwnText : Theme.accent
-                        }
-                        Text {
-                            Layout.fillWidth: true
-                            text: root.kind !== "voice"
-                                  ? "Play video"
-                                  : (root.playing
-                                     ? "Playing…  ·  tap to stop"
-                                     : "Play voice note  ·  " + root.mmss(root.msg.durationMs || 0))
-                            color: root.own ? Theme.bubbleOwnText : Theme.text
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.labelSize
+                            anchors.centerIn: parent
+                            name: "play"
+                            size: 28
+                            color: Theme.bubbleOwnText
                         }
                     }
                     TapHandler {
+                        enabled: String(root.msg.localPath || "") !== ""
                         onTapped: root.openMedia(String(root.msg.key || ""))
                     }
                 }
 
-                // A shared location: the coordinates, tappable through to a map.
-                Rectangle {
-                    Layout.fillWidth: true
+                // A shared location: coordinates + a quiet action hint, matching
+                // Android's locRow rather than nesting a card inside the bubble.
+                ColumnLayout {
                     visible: root.kind === "location"
-                    implicitHeight: 44
-                    radius: Theme.radiusCard
-                    color: root.own ? Qt.rgba(0, 0, 0, 0.22) : Theme.panel
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: Theme.space2
-                        anchors.rightMargin: Theme.space2
-                        spacing: Theme.space2
-                        PeersIcon { name: "search"; size: 16; color: Theme.accent }
-                        Text {
-                            Layout.fillWidth: true
-                            text: root.msg.lat !== undefined
-                                  ? Number(root.msg.lat).toFixed(5) + ", " + Number(root.msg.lng).toFixed(5)
-                                  : ""
-                            color: root.own ? Theme.bubbleOwnText : Theme.text
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.codeSize
-                        }
+                    Layout.fillWidth: true
+                    spacing: 2
+                    Text {
+                        Layout.fillWidth: true
+                        text: root.msg.lat !== undefined
+                              ? Number(root.msg.lat).toFixed(5) + ", " + Number(root.msg.lng).toFixed(5)
+                              : ""
+                        color: root.own ? Theme.bubbleOwnText : Theme.text
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.bodySize
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: "Open in maps"
+                        color: root.own ? Qt.rgba(1, 1, 1, 0.8) : Theme.textDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.captionSize
                     }
                     TapHandler {
                         onTapped: root.openExternal(
@@ -431,16 +538,6 @@ Item {
                     }
                 }
 
-                // Hosted media still downloading. Without this the bubble looks
-                // like a plain text message saying "Photo" until the fetch lands.
-                Text {
-                    Layout.fillWidth: true
-                    visible: root.kind === "media" && !photo.visible
-                    text: "Downloading\u2026"
-                    color: root.own ? Qt.rgba(1, 1, 1, 0.75) : Theme.textDim
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.captionSize
-                }
 
                 // Reaction pills. Emoji here are CONTENT (a user picked them),
                 // not iconography — the never-emoji-as-icon rule doesn't apply.
@@ -481,16 +578,21 @@ Item {
                     }
                 }
 
-                Text {
-                    Layout.alignment: Qt.AlignRight
-                    text: root.failed ? "failed" : Qt.formatDateTime(
-                              new Date(root.msg.timestampMs !== undefined
-                                       ? root.msg.timestampMs : 0), "h:mm AP")
-                    color: root.failed ? Theme.unread
-                           : (root.own ? Qt.rgba(1, 1, 1, 0.75) : Theme.textDim)
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.captionSize
-                }
+            }
+        }
+
+        // Android keeps status/time outside the fill so compact text and media
+        // bubbles do not grow a footer in their coloured surface.
+        Item {
+            Layout.fillWidth: true
+            Layout.preferredHeight: timestamp.implicitHeight
+            Text {
+                id: timestamp
+                x: root.own ? bubble.x + bubble.width - width : bubble.x
+                text: root.statusText
+                color: root.failed ? Theme.unread : Theme.textFaint
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.captionSize
             }
         }
         }

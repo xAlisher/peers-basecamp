@@ -12,7 +12,10 @@ echo "== identicon equivalence =="; node tests/identicon-equivalence.mjs;  [ $? 
 echo "== wire format vs Peers Android =="
 node tests/wire-separator.mjs; rc=$?
 [ $rc -eq 2 ] && echo "  (skipped: no Android checkout)"
-[ $rc -eq 1 ] && fail=1
+[ $rc -ne 0 ] && [ $rc -ne 2 ] && fail=1
+echo "== message layout vs Peers Android =="
+node tests/message-layout.mjs; rc=$?
+[ $rc -ne 0 ] && fail=1
 echo "== parity matrix =="       ; ./scripts/check-parity.sh;              [ $? -ne 0 ] && fail=1
 # The qmldir trap: qml/qmldir is builder-owned. Shipping our own silently breaks
 # the plugin load (see fails/2026-08-09-*.md and the basecamp skill).

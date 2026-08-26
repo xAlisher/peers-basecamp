@@ -420,6 +420,8 @@ bool PeersUiBackend::loadMessages(const QString& convoId)
                 row.insert(QStringLiteral("localPath"), m_mediaPaths.value(cid));
                 row.insert(QStringLiteral("imageUri"),
                            QUrl::fromLocalFile(m_mediaPaths.value(cid)).toString());
+            } else if (m_mediaErrors.contains(cid)) {
+                row.insert(QStringLiteral("mediaError"), m_mediaErrors.value(cid));
             } else if (!cid.isEmpty()) {
                 const QString c = convoId;
                 deferToEventLoop([this, c, cid, keyB64, mcap, mmime] {
@@ -1083,9 +1085,13 @@ void PeersUiBackend::fetchHostedMedia(const QString& convoId, const QString& cid
                                [this, convoId, token](bool ok, QString path, QString err) {
                                    m_fetching.remove(token);
                                    if (!ok) {
+                                       m_mediaErrors.insert(token, err);
                                        report(err);
+                                       if (convoId == currentConversationId())
+                                           loadMessages(convoId);
                                        return;
                                    }
+                                   m_mediaErrors.remove(token);
                                    m_mediaPaths.insert(token, path);
                                    // Re-render the thread so the bubble picks up
                                    // the now-local file.
