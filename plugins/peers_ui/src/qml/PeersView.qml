@@ -70,7 +70,11 @@ Rectangle {
                             || (m.kind === "media"
                                 && String(m.mime || "").indexOf("image/") === 0);
             if (isImage && String(m.imageUri || "") !== "")
-                out.push({ uri: String(m.imageUri), key: String(m.key) });
+                out.push({
+                    uri: String(m.imageUri),
+                    key: String(m.key),
+                    animated: String(m.mime || "") === "image/gif"
+                });
         }
         return out;
     }

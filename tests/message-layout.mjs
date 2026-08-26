@@ -14,6 +14,8 @@ const chatTsx = resolve(android, 'src/screens/ChatScreen.tsx');
 const voiceTsx = resolve(android, 'src/components/VoiceBubble.tsx');
 const helperPath = resolve(root, 'plugins/peers_ui/src/qml/MessageLayout.js');
 const bubblePath = resolve(root, 'plugins/peers_ui/src/qml/MessageBubble.qml');
+const backendPath = resolve(root, 'plugins/peers_ui/src/PeersUiBackend.cpp');
+const mediaToolsPath = resolve(root, 'plugins/peers_ui/src/MediaTools.cpp');
 
 function fail(message) {
   console.error(`FAIL: ${message}`);
@@ -92,6 +94,8 @@ for (const pane of [120, 160, 200, 240]) {
 }
 
 const qml = readFileSync(bubblePath, 'utf8');
+const backend = readFileSync(backendPath, 'utf8');
+const mediaTools = readFileSync(mediaToolsPath, 'utf8');
 if (!qml.includes('import "MessageLayout.js" as MessageLayout')) fail('MessageBubble does not import MessageLayout');
 if (!qml.includes('MessageLayout.fitMedia')) fail('message media dimensions do not use the stable fit helper');
 if (!qml.includes('MessageLayout.downsampleWaveform')) fail('voice waveform is not bounded/downsampled');
@@ -106,5 +110,23 @@ if (!/id:\s*attributionAvatar[\s\S]*?size:\s*16/.test(qml)) fail('incoming attri
 if (/HexAvatar\s*\{[\s\S]{0,180}?size:\s*28\b/.test(qml))
   fail('detached 28px message avatar is still present');
 if (!/clip:\s*true/.test(qml)) fail('media frame does not clip images/GIFs to its rounded bubble');
+if (!/bool PeersUiBackend::playVideo\([\s\S]*?"ffplay"[\s\S]*?"-autoexit"/.test(backend))
+  fail('video playback does not use the managed ffplay path');
+if (!/bool PeersUiBackend::playVideo\([\s\S]*?"-protocol_whitelist"[\s\S]*?"file,crypto,data"/.test(backend))
+  fail('video playback does not restrict nested media protocols to local data');
+const audioPlayerSource = backend.match(/bool PeersUiBackend::playAudio\([\s\S]*?\n}\n\nbool PeersUiBackend::playVideo/)?.[0] ?? '';
+if (!/"ffplay"[\s\S]*?"-protocol_whitelist"[\s\S]*?"file,crypto,data"/.test(audioPlayerSource)
+    || /\{\s*"mpv"/.test(audioPlayerSource))
+  fail('voice playback retains an unrestricted network-capable player path');
+if (!/isVideo[\s\S]{0,500}?playVideo\(path, messageId\)/.test(backend))
+  fail('video attachments do not route through managed playback');
+if (!/if \(isVideo\)[\s\S]{0,500}?No supported video player found[\s\S]{0,500}?return;/.test(backend))
+  fail('video playback failure can fall through to an unrestricted external opener');
+if (!/const bool isVideo[\s\S]{0,1200}?MediaTools::probeMediaSize\(localPath, &w, &h\)/.test(backend))
+  fail('video send does not probe real dimensions before encoding store2');
+if (!/if \(\(isImage \|\| isVideo\) && \(w < 1 \|\| h < 1\)\)[\s\S]{0,300}?Could not determine media dimensions[\s\S]{0,200}?return;/.test(backend))
+  fail('media send can still emit an unreadable 0x0 marker');
+if (!/QStringLiteral\("ffprobe"\)[\s\S]{0,700}?"-protocol_whitelist"[\s\S]{0,200}?"file,crypto,data"[\s\S]{0,300}?"-select_streams"[\s\S]{0,100}?"v:0"/.test(mediaTools))
+  fail('media dimension probing is absent or permits network protocols');
 
 if (!process.exitCode) console.log('ok: message layout matches Android sizing and avatar/media contracts');

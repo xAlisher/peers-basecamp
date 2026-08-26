@@ -29,6 +29,11 @@ QString moduleDir();
 // binary under <moduleDir>/bin/ → the bare name on PATH.
 QString resolveBin(const QString& name);
 
+// Read the first video/image stream's dimensions with ffprobe. Input protocols
+// are restricted to local data so even a playlist-shaped selected file cannot
+// make the helper contact the network.
+bool probeMediaSize(const QString& path, int* width, int* height);
+
 // True when `path` is one of ours under <moduleDir>/bin/.
 bool isBundled(const QString& path);
 

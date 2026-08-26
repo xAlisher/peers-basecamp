@@ -33,7 +33,7 @@ Android ground truth: `docs/FEATURE-INVENTORY.md` (extracted from source with `p
 | **Delivered / read receipts** | **no** | **`dropped`** | Android has none (`ChatScreen.tsx:3`). Do not invent them |
 | Reply / quote (`reply1:`) | yes | `done` | Encode+decode verified cross-device; the quote resolves and shows the ORIGINAL text — `tests/interactions.mjs`, screenshot 20/21 |
 | Forward | yes | `todo` | |
-| Copy | yes | `todo` | |
+| Copy / selectable message text | yes | `done` | Message and quoted-reply bodies are read-only selectable text surfaces; mouse-drag selection and clipboard behavior are covered by packaged and Qt interaction tests |
 | Delete for me (local only) | yes | `todo` | Android has no remote unsend |
 | **Message editing** | **no** | **`dropped`** | Does not exist in Android |
 
@@ -72,8 +72,8 @@ Android ground truth: `docs/FEATURE-INVENTORY.md` (extracted from source with `p
 | Content-marker codec | yes | `wip` | Decode for every marker + encode for reply/reaction/pin/contact-card, verified cross-device. Media encode and malformed-input unit tests still open |
 | Photo, inline (`img1:` wire / `img1v:` local row) | yes | `done` | Sent, decoded and rendered on the peer; PNG/JPEG dimensions read from the header (no QtGui) — `tests/media.mjs`, screenshots 30/31 |
 | Hosted media (`store2:` current, `store1:` legacy) | yes | `done` | Full Android blob format — Padmé padding, AES-256-GCM, `iv‖ct‖tag`, `POST /data`. Verified BOTH ways incl. reading a blob written by an independent implementation (`tests/hosted-media.mjs`). Needs `PEERS_STORAGE_TOKEN`; without it, disabled and said so |
-| GIF | yes | `wip` | Transport works and the bubble animates it (`AnimatedImage`); animation not yet asserted by a test |
-| Video | yes | `wip` | Sends with its real mime and always goes hosted (never inline, which would mislabel it as an image); the bubble opens it in the desktop's player — no inline playback, the host has no QtMultimedia |
+| GIF | yes | `done` | Bubble and full-size viewer use `AnimatedImage`; an extensionless two-frame packaged fixture must advance `currentFrame`. Send probes dimensions when the built-in PNG/JPEG parser cannot |
+| Video | yes | `done` | Sends hosted with its real MIME and ffprobe-derived dimensions, then plays the materialized local file through managed ffplay. Both probing and playback allow only `file,crypto,data`; no inline playback because the host has no QtMultimedia |
 | Voice notes, 2:00 cap (`voc1:` wire / `voc1v:` local row) | yes | `done` | Records from a real mic via an external tool (ffmpeg/parecord/arecord — the host has no QtMultimedia), measures duration and 40 waveform bars from the PCM, transcodes to mono AAC and renders on the peer — `tests/voice.mjs`, screenshots 24-26. Playback opens in the desktop's player |
 | Media viewer (zoom / page / save) | yes | `done` | Android's gestures translated to their desktop equivalents: wheel + double-click zoom, drag pan, arrow keys and chevrons to page every image in the thread, and Save. Swipe-to-dismiss has no desktop equivalent and is not faked — `tests/media.mjs`, screenshot 32 |
 | Reactions (`react1:`) | yes | `done` | Pill renders on the peer with count>1 rule; folded so no raw bubble — `tests/interactions.mjs` |

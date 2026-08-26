@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path, { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 // Builder-native packaged-QML regression gate:
 //   nix build .#integration-test --accept-flake-config -L
@@ -18,6 +19,16 @@ async function evalq(app, expression, objectId) {
 function assert(ok, message) {
   if (!ok) throw new Error(message);
 }
+
+const fixtureDir = process.env.LOGOS_DATA_DIR || "/tmp";
+// Hosted media cache files intentionally have no extension. Keep the fixture
+// identical to that production shape so decoder sniffing is covered.
+const animatedGifPath = path.join(fixtureDir, "peers-animated-fixture");
+fs.mkdirSync(fixtureDir, {recursive: true});
+fs.writeFileSync(animatedGifPath, Buffer.from(
+  "R0lGODlhBAAEAIEAAP8AAAAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQADAAAACwAAAAABAAEAAAICQABCBxIsCCAgAAh+QQBDAABACwAAAAABAAEAIEAAP8AAAAAAAAAAAAICQABCBxIsCCAgAA7",
+  "base64"));
+const animatedGifUri = pathToFileURL(animatedGifPath).href;
 
 const sender = "b950463e1234567890abcdef1234567890abcdef1234567890abcdef12345678";
 const common = {
@@ -73,6 +84,42 @@ test("peers_ui: packaged message delegates have bounded Android-parity geometry"
       assert(narrow.w <= narrow.max, "narrow media bubble exceeds its cap");
       assert(narrow.media <= narrow.max - 4, "narrow media child exceeds the bubble interior");
     }
+    if (fixtures[index].key === "text-in") {
+      const bodyName = `${objectName}-body`;
+      const bodyMatch = await app.findByProperty("objectName", bodyName);
+      assert(!bodyMatch.error && bodyMatch.matches?.length,
+        "message body is not exposed as a selectable text control");
+      const bodyId = bodyMatch.matches[0].id;
+      const body = JSON.parse(await evalq(app,
+        "select(0,5);JSON.stringify({readOnly:readOnly,selectByMouse:selectByMouse,textFormat:textFormat,selectedText:selectedText})",
+        bodyId));
+      assert(body.readOnly === true, "message text must be read-only");
+      assert(body.selectByMouse === true, "message text must support mouse selection");
+      assert(body.textFormat === 0, "peer message text must remain plain text");
+      assert(body.selectedText === "Short", `message selection failed: ${JSON.stringify(body)}`);
+    }
+    if (fixtures[index].key === "reply") {
+      const quoteMatch = await app.findByProperty("objectName", `${objectName}-quote-body`);
+      assert(!quoteMatch.error && quoteMatch.matches?.length,
+        "quoted message body is not selectable");
+      const quote = JSON.parse(await evalq(app,
+        "selectAll();JSON.stringify({readOnly:readOnly,selectByMouse:selectByMouse,selectedText:selectedText})",
+        quoteMatch.matches[0].id));
+      assert(quote.readOnly && quote.selectByMouse && quote.selectedText === "Original",
+        `quoted message selection failed: ${JSON.stringify(quote)}`);
+    }
+    if (fixtures[index].key === "video") {
+      const playName = `${objectName}-video-play`;
+      const playMatch = await app.findByProperty("objectName", playName);
+      assert(!playMatch.error && playMatch.matches?.length,
+        "video bubble has no dedicated play control");
+      const play = JSON.parse(await evalq(app,
+        "JSON.stringify({enabled:enabled,role:Accessible.role,name:Accessible.name})",
+        playMatch.matches[0].id));
+      assert(play.enabled === true, "downloaded video play control is disabled");
+      assert(play.role > 0 && play.name === "Play video",
+        `video play control is not accessible: ${JSON.stringify(play)}`);
+    }
     await evalq(app, "destroy()", objectId);
   }
 
@@ -81,6 +128,35 @@ test("peers_ui: packaged message delegates have bounded Android-parity geometry"
   const dir = path.join(process.env.LOGOS_DATA_DIR || "/extra/tmp/peers-layout", "screenshots", "message-layout");
   fs.mkdirSync(dir, {recursive: true});
   fs.writeFileSync(path.join(dir, "packaged-gallery.png"), Buffer.from(shot.image, "base64"));
+});
+
+test("peers_ui: media viewer keeps animated GIFs animated", async (app) => {
+  const objectName = "peers-animated-media-viewer";
+  const created = await evalq(app, `(function(){
+    var c=Qt.createComponent(Qt.resolvedUrl("MediaViewer.qml"));
+    if(c.status!==Component.Ready)return "ERROR: "+c.errorString();
+    var o=c.createObject(root,{objectName:${JSON.stringify(objectName)},images:[{uri:${JSON.stringify(animatedGifUri)},key:"animated-fixture",animated:true}],index:0,width:320,height:240,x:20,y:20,visible:true,z:2000});
+    return o?o.objectName:"ERROR: createObject returned null";
+  })()`);
+  assert(created === objectName, `animated viewer creation failed: ${created}`);
+
+  const animationName = `${objectName}-animation`;
+  const observedFrames = new Set();
+  await app.waitFor(async () => {
+    const match = await app.findByProperty("objectName", animationName);
+    if (match.error || !match.matches?.length)
+      throw new Error("media viewer has no AnimatedImage renderer");
+    const state = JSON.parse(await evalq(app,
+      "JSON.stringify({frameCount:frameCount,currentFrame:currentFrame,playing:playing})",
+      match.matches[0].id));
+    if (state.frameCount >= 2 && state.playing)
+      observedFrames.add(state.currentFrame);
+    if (observedFrames.size < 2)
+      throw new Error(`GIF frame did not advance: ${JSON.stringify(state)}`);
+  }, {timeout: 5000, interval: 50, description: "animated GIF viewer to advance frames"});
+
+  const viewer = await app.findByProperty("objectName", objectName);
+  await evalq(app, "destroy()", viewer.matches[0].id);
 });
 
 run();

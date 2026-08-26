@@ -3,6 +3,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
+#include <QProcess>
+#include <QRegularExpression>
 #include <QStandardPaths>
 
 namespace MediaTools {
@@ -62,6 +64,58 @@ QString resolveBin(const QString& name)
     // Not bundled — fall back to PATH. Returns empty when it is not there, so
     // callers can say which tool is missing instead of failing opaquely.
     return QStandardPaths::findExecutable(name);
+}
+
+bool probeMediaSize(const QString& path, int* width, int* height)
+{
+    if (!width || !height || path.isEmpty())
+        return false;
+
+    const QString exe = resolveBin(QStringLiteral("ffprobe"));
+    if (exe.isEmpty())
+        return false;
+
+    QProcess probe;
+    probe.setProcessEnvironment(cleanSpawnEnv());
+    probe.setProgram(exe);
+    probe.setArguments({QStringLiteral("-v"),
+                        QStringLiteral("error"),
+                        QStringLiteral("-protocol_whitelist"),
+                        QStringLiteral("file,crypto,data"),
+                        QStringLiteral("-select_streams"),
+                        QStringLiteral("v:0"),
+                        QStringLiteral("-show_entries"),
+                        QStringLiteral("stream=width,height"),
+                        QStringLiteral("-of"),
+                        QStringLiteral("csv=p=0:s=x"),
+                        QStringLiteral("-i"),
+                        path});
+    probe.start();
+    if (!probe.waitForStarted(1500) || !probe.waitForFinished(5000)) {
+        probe.kill();
+        probe.waitForFinished(1000);
+        return false;
+    }
+    if (probe.exitStatus() != QProcess::NormalExit || probe.exitCode() != 0)
+        return false;
+
+    const QString output = QString::fromUtf8(probe.readAllStandardOutput().left(128)).trimmed();
+    static const QRegularExpression dimensions(QStringLiteral("^(\\d+)x(\\d+)$"));
+    const QRegularExpressionMatch match = dimensions.match(output);
+    if (!match.hasMatch())
+        return false;
+
+    bool widthOk = false;
+    bool heightOk = false;
+    const int parsedWidth = match.captured(1).toInt(&widthOk);
+    const int parsedHeight = match.captured(2).toInt(&heightOk);
+    if (!widthOk || !heightOk || parsedWidth < 1 || parsedWidth > 100000
+        || parsedHeight < 1 || parsedHeight > 100000) {
+        return false;
+    }
+    *width = parsedWidth;
+    *height = parsedHeight;
+    return true;
 }
 
 QString mediaCacheDir()

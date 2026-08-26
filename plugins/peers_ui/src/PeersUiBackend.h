@@ -189,6 +189,7 @@ private:
     QProcess* m_player = nullptr;
     void stopPlayback();
     bool playAudio(const QString& path, const QString& key);
+    bool playVideo(const QString& path, const QString& key);
     // convoId+cid already being fetched, so a re-render doesn't refetch.
     QSet<QString> m_fetching;
     // cid → local decrypted file, so a fetched blob is handed to the view

@@ -19,6 +19,9 @@ Rectangle {
     // A bounded data: URI handed over by the backend — this never touches the
     // filesystem or the network.
     property string source: ""
+    // GIFs must keep animating in the full-pane viewer. Plain photos continue to
+    // use Image so they retain the cheaper asynchronous decode path.
+    property bool animated: false
 
     // Every image in the conversation, as [{ uri, key }], so the viewer can page
     // the way Android's pager does. `index` selects one; with no list the viewer
@@ -29,6 +32,8 @@ Rectangle {
     readonly property bool paged: index >= 0 && index < images.length
     readonly property string current: paged ? images[index].uri : source
     readonly property string currentKey: paged ? images[index].key : ""
+    readonly property bool currentAnimated: paged ? images[index].animated === true : animated
+    readonly property int currentStatus: currentAnimated ? animation.status : photo.status
 
     signal closed
     // The caller owns the file dialog and the backend call; the viewer only says
@@ -109,11 +114,33 @@ Rectangle {
         }
     }
 
+    AnimatedImage {
+        id: animation
+        objectName: root.objectName + "-animation"
+        anchors.fill: parent
+        anchors.margins: Theme.space6
+        visible: root.currentAnimated
+        source: visible ? root.current : ""
+        fillMode: Image.PreserveAspectFit
+        scale: root.zoom
+        transformOrigin: Item.Center
+        x: root.panX
+        y: root.panY
+        playing: visible
+        cache: false
+        sourceSize.width: 1600
+        sourceSize.height: 1600
+        horizontalAlignment: Image.AlignHCenter
+        verticalAlignment: Image.AlignVCenter
+        Behavior on scale { NumberAnimation { duration: 90 } }
+    }
+
     Image {
         id: photo
         anchors.fill: parent
         anchors.margins: Theme.space6
-        source: root.current
+        visible: !root.currentAnimated
+        source: visible ? root.current : ""
         fillMode: Image.PreserveAspectFit
         scale: root.zoom
         transformOrigin: Item.Center
@@ -133,9 +160,9 @@ Rectangle {
 
     Text {
         anchors.centerIn: parent
-        visible: photo.status === Image.Loading || photo.status === Image.Error
+        visible: root.currentStatus === Image.Loading || root.currentStatus === Image.Error
                  || root.current === ""
-        text: photo.status === Image.Error ? "media unavailable"
+        text: root.currentStatus === Image.Error ? "media unavailable"
               : (root.current === "" ? "no media" : "loading…")
         // Android spec is rgba(255,255,255,0.6); expressed as the text token at
         // 60% so the colour still comes from Theme. The overlay ground is always
