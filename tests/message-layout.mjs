@@ -138,5 +138,16 @@ if (!/if \(storageToken\(\)\.isEmpty\(\) && cap\.isEmpty\(\)\)/.test(downloadSou
   fail('hosted downloads still require a shared bearer even when a per-blob capability exists');
 if (!/if \(!storageToken\(\)\.isEmpty\(\) && cap\.isEmpty\(\)\)[\s\S]{0,160}?setRawHeader\("Authorization"/.test(downloadSource))
   fail('hosted download still transmits the legacy bearer with a per-blob capability');
+if (!/QString StorageClient::cacheFileFor\(const QString& cid, const QString& mime\)/.test(storageClient)
+    || !/cacheFileFor\(cid, mime\)/.test(downloadSource))
+  fail('hosted media cache paths do not retain a decoder-safe MIME suffix');
+const cachePathSource = storageClient.match(/QString StorageClient::cacheFileFor\([\s\S]*?\n}\n/)?.[0] ?? '';
+if (!/MediaTools::mediaCacheDir\(\)/.test(cachePathSource))
+  fail('hosted media is materialized outside the module-local QML-readable cache');
+const cacheSuffixSource = storageClient.match(/QString StorageClient::cacheSuffixForMime\([\s\S]*?\n}\n/)?.[0] ?? '';
+if (!/image\/jpeg[\s\S]*?\.jpg/.test(cacheSuffixSource)
+    || !/image\/png[\s\S]*?\.png/.test(cacheSuffixSource)
+    || !/return QStringLiteral\("\.bin"\)/.test(cacheSuffixSource))
+  fail('hosted cache suffixes are not fixed/allowlisted with a safe .bin fallback');
 
 if (!process.exitCode) console.log('ok: message layout matches Android sizing and avatar/media contracts');

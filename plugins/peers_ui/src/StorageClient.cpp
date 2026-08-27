@@ -1,5 +1,7 @@
 #include "StorageClient.h"
 
+#include "MediaTools.h"
+
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -7,7 +9,6 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QRegularExpression>
-#include <QStandardPaths>
 #include <QUrl>
 #include <QUrlQuery>
 
@@ -87,14 +88,29 @@ bool StorageClient::validKeyB64(const QString& keyB64)
     return QByteArray::fromBase64(keyB64.toLatin1()).size() == kKeyLen;
 }
 
-QString StorageClient::cacheFileFor(const QString& cid)
+QString StorageClient::cacheSuffixForMime(const QString& mime)
 {
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
-        + QStringLiteral("/media");
+    const QString lower = mime.toLower();
+    if (lower == QLatin1String("image/jpeg") || lower == QLatin1String("image/jpg"))
+        return QStringLiteral(".jpg");
+    if (lower == QLatin1String("image/png"))
+        return QStringLiteral(".png");
+    if (lower == QLatin1String("image/gif"))
+        return QStringLiteral(".gif");
+    if (lower == QLatin1String("image/webp"))
+        return QStringLiteral(".webp");
+    if (lower == QLatin1String("image/bmp"))
+        return QStringLiteral(".bmp");
+    return QStringLiteral(".bin");
+}
+
+QString StorageClient::cacheFileFor(const QString& cid, const QString& mime)
+{
+    const QString dir = MediaTools::mediaCacheDir();
     QDir().mkpath(dir);
     const QByteArray h =
         QCryptographicHash::hash(cid.toUtf8(), QCryptographicHash::Sha256).toHex();
-    return dir + QLatin1Char('/') + QString::fromLatin1(h);
+    return dir + QLatin1Char('/') + QString::fromLatin1(h) + cacheSuffixForMime(mime);
 }
 
 // ── upload ──────────────────────────────────────────────────────────────────
@@ -197,7 +213,7 @@ void StorageClient::downloadDecrypt(const QString& cid, const QString& keyB64, c
         return;
     }
 
-    const QString cachePath = cacheFileFor(cid);
+    const QString cachePath = cacheFileFor(cid, mime);
     {
         QFile cached(cachePath);
         // A non-empty cache file short-circuits the whole fetch.

@@ -71,8 +71,10 @@ public:
                          const QString& mime, DownloadCb cb);
 
     // Cache path for a CID: SHA-256(cid) in lowercase hex, never the raw CID —
-    // a peer-supplied identifier must not become a filename.
-    static QString cacheFileFor(const QString& cid);
+    // a peer-supplied identifier must not become a filename. A fixed suffix is
+    // retained so Qt Quick can select an image decoder for local file URLs.
+    static QString cacheFileFor(const QString& cid, const QString& mime);
+    static QString cacheSuffixForMime(const QString& mime);
 
     // Field validation, mirroring StorageRef.kt. Exposed for tests.
     static bool validCid(const QString& cid);
