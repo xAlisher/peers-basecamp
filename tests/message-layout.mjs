@@ -138,6 +138,11 @@ if (!/if \(storageToken\(\)\.isEmpty\(\) && cap\.isEmpty\(\)\)/.test(downloadSou
   fail('hosted downloads still require a shared bearer even when a per-blob capability exists');
 if (!/if \(!storageToken\(\)\.isEmpty\(\) && cap\.isEmpty\(\)\)[\s\S]{0,160}?setRawHeader\("Authorization"/.test(downloadSource))
   fail('hosted download still transmits the legacy bearer with a per-blob capability');
+if (!/ContentLengthHeader/.test(downloadSource)
+    || !/&QIODevice::readyRead/.test(downloadSource)
+    || !/reply->abort\(\)/.test(downloadSource)
+    || /const QByteArray blob = reply->readAll\(\)/.test(downloadSource))
+  fail('hosted downloads are not bounded before peer-controlled response buffering');
 if (!/QString StorageClient::cacheFileFor\(const QString& cid, const QString& mime\)/.test(storageClient)
     || !/cacheFileFor\(cid, mime\)/.test(downloadSource))
   fail('hosted media cache paths do not retain a decoder-safe MIME suffix');
@@ -149,5 +154,37 @@ if (!/image\/jpeg[\s\S]*?\.jpg/.test(cacheSuffixSource)
     || !/image\/png[\s\S]*?\.png/.test(cacheSuffixSource)
     || !/return QStringLiteral\("\.bin"\)/.test(cacheSuffixSource))
   fail('hosted cache suffixes are not fixed/allowlisted with a safe .bin fallback');
+const uploadSource = storageClient.match(/void StorageClient::uploadEncrypted\([\s\S]*?\n}\n\n\/\/ ── download/)?.[0] ?? '';
+if (!/\/data\/upload-challenges/.test(uploadSource)
+    || !/\/data\/upload-grants/.test(uploadSource)
+    || !/X-Upload-Grant/.test(uploadSource))
+  fail('hosted uploads do not use the one-use upload-grant protocol');
+if (/setRawHeader\("Authorization"/.test(uploadSource) || /if \(!uploadConfigured\(\)\)/.test(uploadSource))
+  fail('hosted uploads still depend on a reusable bearer credential');
+if (!/QThread::create/.test(uploadSource))
+  fail('upload proof-of-work is not kept off the Basecamp UI thread');
+if (/exactInteger\(const QJsonValue&/.test(storageClient)
+    || !/exactIntegerToken\(const QByteArray& token/.test(storageClient)
+    || !/toLongLong\(&ok, 10\)/.test(storageClient))
+  fail('upload grant integers are not validated from exact integral JSON tokens');
+if (/globalMatch\(QString::fromUtf8\(body\)\)/.test(storageClient)
+    || !/challengeTokens\.value\(QStringLiteral\("difficulty"\)\)/.test(storageClient)
+    || !/grantTokens\.value\(QStringLiteral\("max_bytes"\)\)/.test(storageClient))
+  fail('upload grant integers are not bound to their decoded top-level members');
+if (/QString::fromUtf8\(uploadBody\)\.trimmed\(\)/.test(uploadSource)
+    || !/QString::fromUtf8\(uploadBody\)/.test(uploadSource))
+  fail('upload response accepts whitespace instead of the exact cid:cap form');
+if (!/info\.size\(\).*maxHostedPlaintextBytes/s.test(backend))
+  fail('hosted media size is not rejected before reading the selected file');
+if (!/f\.read\(StorageClient::maxHostedPlaintextBytes\(\) \+ 1\)/.test(backend)
+    || /const QByteArray bytes = f\.readAll\(\)/.test(backend))
+  fail('hosted file reads are not bounded against metadata and symlink races');
+if (!/readError != QFile::NoError/.test(backend))
+  fail('partial hosted file reads are not rejected');
+if (!/QElapsedTimer/.test(storageClient) || !/std::numeric_limits<qint64>::max\(\)/.test(storageClient))
+  fail('upload proof work lacks monotonic and overflow-safe bounds');
+if (!/uniqueTopLevelObjectKeys/.test(storageClient)
+    || !/if \(!keys\.insert\(key\)\.second\)/.test(storageClient))
+  fail('upload grant JSON does not reject duplicate members independent of value type');
 
 if (!process.exitCode) console.log('ok: message layout matches Android sizing and avatar/media contracts');

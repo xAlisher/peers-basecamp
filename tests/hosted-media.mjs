@@ -13,10 +13,10 @@
 // phone: it proves our reader against a writer that is not ours. Our writer is
 // in turn proved by our reader in the WRITE direction.
 //
-//   PEERS_STORAGE_TOKEN=… node tests/hosted-media.mjs [alicePort] [bobPort]
+//   node tests/hosted-media.mjs [alicePort] [bobPort]
 //
-// Skips (exit 0, loudly) when no storage token is configured — the same state a
-// default Android build ships in.
+// Uploads are tokenless: both Desktop and the independent Node writer must
+// acquire a short-lived exact-size one-use grant.
 //
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -41,7 +41,82 @@ const ALICE_PORT = Number(process.argv[2] ?? 5591);
 const BOB_PORT = Number(process.argv[3] ?? 5592);
 
 const BASE = process.env.PEERS_STORAGE_BASE || "https://msg.logos.live/s/api/storage/v1";
-const TOKEN = process.env.PEERS_STORAGE_TOKEN || "";
+
+function strictObject(value, keys, what) {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error(`invalid ${what}`);
+  const actual = Object.keys(value).sort().join(",");
+  if (actual !== [...keys].sort().join(",")) throw new Error(`invalid ${what} keys`);
+  return value;
+}
+
+function leadingZeroBits(bytes) {
+  let bits = 0;
+  for (const value of bytes) {
+    if (value === 0) {
+      bits += 8;
+      continue;
+    }
+    bits += Math.clz32(value) - 24;
+    break;
+  }
+  return bits;
+}
+
+function solveProof(challenge, bytes, difficulty) {
+  for (let nonce = 0; Number.isSafeInteger(nonce); nonce++) {
+    const digest = crypto
+      .createHash("sha256")
+      .update(`${challenge}:${bytes}:${nonce}`, "utf8")
+      .digest();
+    if (leadingZeroBits(digest) >= difficulty) return nonce;
+  }
+  throw new Error("proof nonce exhausted");
+}
+
+async function requestUploadGrant(bytes) {
+  const challengeRes = await fetch(`${BASE}/data/upload-challenges`, { method: "POST" });
+  if (!challengeRes.ok)
+    throw new Error(`challenge failed: HTTP ${challengeRes.status}`);
+  const challenge = strictObject(
+    JSON.parse(await challengeRes.text()),
+    ["challenge", "difficulty", "expires_at"],
+    "challenge",
+  );
+  const now = Math.floor(Date.now() / 1000);
+  if (
+    !/^[0-9a-f]{64}$/.test(challenge.challenge) ||
+    !Number.isInteger(challenge.difficulty) ||
+    challenge.difficulty < 1 ||
+    challenge.difficulty > 24 ||
+    !Number.isInteger(challenge.expires_at) ||
+    challenge.expires_at <= now ||
+    challenge.expires_at > now + 120
+  )
+    throw new Error("invalid challenge caveats");
+  const nonce = solveProof(challenge.challenge, bytes, challenge.difficulty);
+  const grantRes = await fetch(`${BASE}/data/upload-grants`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ challenge: challenge.challenge, bytes, nonce }),
+  });
+  if (!grantRes.ok) throw new Error(`grant failed: HTTP ${grantRes.status}`);
+  const grant = strictObject(
+    JSON.parse(await grantRes.text()),
+    ["grant", "max_bytes", "expires_at"],
+    "grant",
+  );
+  const grantNow = Math.floor(Date.now() / 1000);
+  if (
+    !/^[0-9a-f]{64}$/.test(grant.grant) ||
+    grant.max_bytes !== bytes ||
+    !Number.isInteger(grant.expires_at) ||
+    grant.expires_at <= grantNow ||
+    grant.expires_at > grantNow + 120
+  )
+    throw new Error("invalid grant caveats");
+  return grant.grant;
+}
 
 // Comfortably over the 256 KiB inline cap, so sendMedia must take the hosted path.
 const W = 700;
@@ -123,11 +198,12 @@ async function uploadLikeAndroid(bytes) {
   const c = crypto.createCipheriv("aes-256-gcm", key, iv);
   const ct = Buffer.concat([c.update(plain), c.final()]);
   const blob = Buffer.concat([iv, ct, c.getAuthTag()]);
+  const grant = await requestUploadGrant(blob.length);
 
   const res = await fetch(`${BASE}/data`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${TOKEN}`,
+      "X-Upload-Grant": grant,
       "Content-Type": "application/octet-stream",
     },
     body: blob,
@@ -155,14 +231,6 @@ async function findByKind(insp, kind) {
 }
 
 async function main() {
-  if (!TOKEN) {
-    console.log(
-      "SKIP: no PEERS_STORAGE_TOKEN configured, so hosted media is disabled —\n" +
-        "      the same state a default Android build ships in. Set the token to run this gate.",
-    );
-    process.exit(EXIT_OK);
-  }
-
   const png = makePng(W, H);
   const file = path.join(os.tmpdir(), "peers-test-hosted.png");
   fs.writeFileSync(file, png);
@@ -199,7 +267,7 @@ async function main() {
   if (sent.padded !== true) throw new Error("the desktop must emit store2 (padded), not store1");
   if (sent.width !== W || sent.height !== H)
     throw new Error(`dimensions wrong in the marker: ${sent.width}x${sent.height}`);
-  step(`desktop uploaded: cid=${String(sent.cid).slice(0, 16)}… padded=${sent.padded}`);
+  step(`desktop uploaded an encrypted padded object`);
 
   await waitFor(
     async () => {

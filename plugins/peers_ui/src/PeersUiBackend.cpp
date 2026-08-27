@@ -965,14 +965,29 @@ void PeersUiBackend::sendMedia(QString conversationId, QString localPath, QStrin
         report(QStringLiteral("That file does not exist: %1").arg(info.fileName()));
         return;
     }
+    if (info.size() > StorageClient::maxHostedPlaintextBytes()) {
+        report(QStringLiteral("%1 is too large to send. Nothing was read or sent.")
+                   .arg(info.fileName()));
+        return;
+    }
 
     QFile f(localPath);
     if (!f.open(QIODevice::ReadOnly)) {
         report(QStringLiteral("Could not read %1").arg(info.fileName()));
         return;
     }
-    const QByteArray bytes = f.readAll();
+    const QByteArray bytes = f.read(StorageClient::maxHostedPlaintextBytes() + 1);
+    const QFile::FileError readError = f.error();
     f.close();
+    if (readError != QFile::NoError) {
+        report(QStringLiteral("Could not completely read %1. Nothing was sent.")
+                   .arg(info.fileName()));
+        return;
+    }
+    if (bytes.size() > StorageClient::maxHostedPlaintextBytes()) {
+        report(QStringLiteral("%1 grew too large to send. Nothing was sent.").arg(info.fileName()));
+        return;
+    }
 
     // Videos and audio must carry their real type: the receiver picks a player
     // from the mime, and calling an mp4 "image/png" makes it unplayable on both
@@ -1030,21 +1045,6 @@ void PeersUiBackend::sendMedia(QString conversationId, QString localPath, QStrin
     // reference travels in the chat — the same split Android makes.
     if (isImage && bytes.size() <= ContentMarkers::maxInlineBytes()) {
         sendMessage(conversationId, ContentMarkers::encodeInlinePhoto(mime, w, h, bytes));
-        return;
-    }
-
-    if (!storage()->uploadConfigured()) {
-        report(isImage
-                   ? QStringLiteral("%1 is %2 KB — too large to send inline (limit %3 KB), and "
-                                    "hosted media is not configured on this install. Set "
-                                    "PEERS_STORAGE_TOKEN to enable it. Nothing was sent.")
-                         .arg(info.fileName())
-                         .arg(bytes.size() / 1024)
-                         .arg(ContentMarkers::maxInlineBytes() / 1024)
-                   : QStringLiteral("%1 can only be sent as hosted media, which is not configured "
-                                    "on this install. Set PEERS_STORAGE_TOKEN to enable it. "
-                                    "Nothing was sent.")
-                         .arg(info.fileName()));
         return;
     }
 

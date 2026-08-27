@@ -3,14 +3,26 @@
 #include "MediaTools.h"
 
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
+#include <QHash>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QRegularExpression>
+#include <QThread>
 #include <QUrl>
 #include <QUrlQuery>
+
+#include <limits>
+#include <memory>
+#include <set>
 
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -25,6 +37,9 @@ constexpr int kKeyLen = 32;
 // StorageRef.kt:28 — refuse anything larger up front rather than streaming it
 // into memory.
 constexpr qint64 kMaxCiphertextBytes = 100LL * 1024 * 1024;
+constexpr qint64 kMaxSmallResponseBytes = 4096;
+constexpr int kMaxProofDifficulty = 24;
+constexpr qint64 kMaxClockHorizonSeconds = 2 * 60;
 
 QString envOr(const char* name, const QString& fallback)
 {
@@ -40,6 +55,198 @@ QString storageBase()
 
 QString storageToken() { return envOr("PEERS_STORAGE_TOKEN", QString()); }
 
+void skipJsonWhitespace(const QByteArray& body, qsizetype* offset)
+{
+    while (*offset < body.size()
+           && (body[*offset] == ' ' || body[*offset] == '\t' || body[*offset] == '\r'
+               || body[*offset] == '\n'))
+        ++*offset;
+}
+
+bool takeJsonString(const QByteArray& body, qsizetype* offset, QByteArray* encoded)
+{
+    if (*offset >= body.size() || body[*offset] != '"')
+        return false;
+    const qsizetype start = (*offset)++;
+    while (*offset < body.size()) {
+        const char value = body[(*offset)++];
+        if (value == '\\') {
+            if (*offset >= body.size())
+                return false;
+            ++*offset;
+        } else if (value == '"') {
+            if (encoded)
+                *encoded = body.mid(start, *offset - start);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool skipJsonValue(const QByteArray& body, qsizetype* offset)
+{
+    skipJsonWhitespace(body, offset);
+    if (*offset >= body.size())
+        return false;
+    if (body[*offset] == '"')
+        return takeJsonString(body, offset, nullptr);
+    if (body[*offset] == '{' || body[*offset] == '[') {
+        QByteArray closers;
+        closers.append(body[(*offset)++] == '{' ? '}' : ']');
+        while (*offset < body.size() && !closers.isEmpty()) {
+            if (body[*offset] == '"') {
+                if (!takeJsonString(body, offset, nullptr))
+                    return false;
+                continue;
+            }
+            const char value = body[(*offset)++];
+            if (value == '{')
+                closers.append('}');
+            else if (value == '[')
+                closers.append(']');
+            else if (value == closers.back())
+                closers.chop(1);
+        }
+        return closers.isEmpty();
+    }
+    const qsizetype start = *offset;
+    while (*offset < body.size() && body[*offset] != ',' && body[*offset] != '}')
+        ++*offset;
+    return *offset > start;
+}
+
+bool uniqueTopLevelObjectKeys(const QByteArray& body, QHash<QString, QByteArray>* values)
+{
+    if (!values)
+        return false;
+    values->clear();
+    qsizetype offset = 0;
+    skipJsonWhitespace(body, &offset);
+    if (offset >= body.size() || body[offset++] != '{')
+        return false;
+    std::set<QString> keys;
+    skipJsonWhitespace(body, &offset);
+    if (offset < body.size() && body[offset] == '}') {
+        ++offset;
+    } else {
+        while (offset < body.size()) {
+            QByteArray encodedKey;
+            if (!takeJsonString(body, &offset, &encodedKey))
+                return false;
+            QJsonParseError error;
+            const QJsonDocument keyDocument =
+                QJsonDocument::fromJson(QByteArray("[") + encodedKey + ']', &error);
+            if (error.error != QJsonParseError::NoError || !keyDocument.isArray()
+                || keyDocument.array().size() != 1 || !keyDocument.array().first().isString())
+                return false;
+            const QString key = keyDocument.array().first().toString();
+            if (!keys.insert(key).second)
+                return false;
+            skipJsonWhitespace(body, &offset);
+            if (offset >= body.size() || body[offset++] != ':')
+                return false;
+            skipJsonWhitespace(body, &offset);
+            const qsizetype valueStart = offset;
+            if (!skipJsonValue(body, &offset))
+                return false;
+            qsizetype valueEnd = offset;
+            while (valueEnd > valueStart
+                   && (body[valueEnd - 1] == ' ' || body[valueEnd - 1] == '\t'
+                       || body[valueEnd - 1] == '\r' || body[valueEnd - 1] == '\n'))
+                --valueEnd;
+            values->insert(key, body.mid(valueStart, valueEnd - valueStart));
+            skipJsonWhitespace(body, &offset);
+            if (offset < body.size() && body[offset] == ',') {
+                ++offset;
+                skipJsonWhitespace(body, &offset);
+                continue;
+            }
+            if (offset >= body.size() || body[offset++] != '}')
+                return false;
+            break;
+        }
+    }
+    skipJsonWhitespace(body, &offset);
+    return offset == body.size();
+}
+
+bool exactIntegerToken(const QByteArray& token, qint64* out)
+{
+    static const QRegularExpression expression(QStringLiteral("^-?(?:0|[1-9][0-9]*)$"));
+    const QString text = QString::fromUtf8(token);
+    if (!expression.match(text).hasMatch())
+        return false;
+    bool ok = false;
+    const qint64 value = text.toLongLong(&ok, 10);
+    if (ok)
+        *out = value;
+    return ok;
+}
+
+bool strictObject(const QByteArray& body, const QStringList& expected, QJsonObject* out,
+                  QHash<QString, QByteArray>* tokens)
+{
+    if (!uniqueTopLevelObjectKeys(body, tokens))
+        return false;
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(body, &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject())
+        return false;
+    const QJsonObject object = document.object();
+    QStringList actual = object.keys();
+    QStringList wanted = expected;
+    actual.sort();
+    wanted.sort();
+    if (actual != wanted)
+        return false;
+    *out = object;
+    return true;
+}
+
+bool validOpaque64(const QString& value)
+{
+    static const QRegularExpression re(QStringLiteral("^[0-9a-f]{64}$"));
+    return re.match(value).hasMatch();
+}
+
+bool validUploadCapability(const QString& value)
+{
+    static const QRegularExpression re(QStringLiteral("^[0-9a-f]{32}$"));
+    return re.match(value).hasMatch();
+}
+
+int leadingZeroBits(const QByteArray& digest)
+{
+    int bits = 0;
+    for (unsigned char value : digest) {
+        if (value == 0) {
+            bits += 8;
+            continue;
+        }
+        for (unsigned char mask = 0x80; (value & mask) == 0; mask >>= 1)
+            ++bits;
+        break;
+    }
+    return bits;
+}
+
+qint64 solveProof(const QString& challenge, qint64 bytes, int difficulty, qint64 budgetMillis)
+{
+    const QByteArray prefix = challenge.toUtf8() + ':' + QByteArray::number(bytes) + ':';
+    QElapsedTimer elapsed;
+    elapsed.start();
+    for (qint64 nonce = 0;; ++nonce) {
+        const QByteArray digest = QCryptographicHash::hash(
+            prefix + QByteArray::number(nonce), QCryptographicHash::Sha256);
+        if (leadingZeroBits(digest) >= difficulty)
+            return nonce;
+        if ((nonce & 0xfff) == 0 && elapsed.hasExpired(budgetMillis))
+            return -1;
+        if (nonce == std::numeric_limits<qint64>::max())
+            return -1;
+    }
+}
+
 } // namespace
 
 StorageClient::StorageClient(QObject* parent)
@@ -53,8 +260,60 @@ StorageClient::StorageClient(QObject* parent)
 
 StorageClient::~StorageClient() = default;
 
-bool StorageClient::uploadConfigured() const { return !storageToken().isEmpty(); }
 QString StorageClient::baseUrl() const { return storageBase(); }
+
+qint64 StorageClient::maxHostedPlaintextBytes()
+{
+    static const qint64 maximum = [] {
+        qint64 low = 0;
+        qint64 high = kMaxCiphertextBytes;
+        while (low < high) {
+            const qint64 middle = low + (high - low + 1) / 2;
+            const qint64 ciphertext =
+                MediaPadding::padmeBucket(MediaPadding::headerBytes() + middle) + kIvLen + kTagLen;
+            if (ciphertext <= kMaxCiphertextBytes)
+                low = middle;
+            else
+                high = middle - 1;
+        }
+        return low;
+    }();
+    return maximum;
+}
+
+void StorageClient::postBounded(QNetworkRequest request, const QByteArray& body, PostCb cb)
+{
+    QNetworkReply* reply = m_net->post(request, body);
+    const auto received = std::make_shared<QByteArray>();
+    const auto oversized = std::make_shared<bool>(false);
+
+    connect(reply, &QIODevice::readyRead, this, [reply, received, oversized] {
+        received->append(reply->read(kMaxSmallResponseBytes + 1 - received->size()));
+        if (received->size() > kMaxSmallResponseBytes || reply->bytesAvailable() > 0) {
+            *oversized = true;
+            reply->abort();
+        }
+    });
+    connect(reply, &QNetworkReply::finished, this, [reply, received, oversized, cb] {
+        received->append(reply->read(kMaxSmallResponseBytes + 1 - received->size()));
+        reply->deleteLater();
+        if (*oversized || received->size() > kMaxSmallResponseBytes) {
+            cb(false, {}, QStringLiteral("The storage response was too large."));
+            return;
+        }
+        const int status =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status >= 300 && status < 400) {
+            cb(false, {}, QStringLiteral("The storage node tried to redirect the request."));
+            return;
+        }
+        if (reply->error() != QNetworkReply::NoError) {
+            cb(false, {}, QStringLiteral("The storage request failed."));
+            return;
+        }
+        cb(true, *received, QString());
+    });
+}
 
 // ── validation (StorageRef.kt:38-53) ────────────────────────────────────────
 
@@ -117,13 +376,10 @@ QString StorageClient::cacheFileFor(const QString& cid, const QString& mime)
 
 void StorageClient::uploadEncrypted(const QByteArray& bytes, UploadCb cb)
 {
-    if (!uploadConfigured()) {
-        cb(false, {},
-           QStringLiteral("Hosted media is not configured on this install "
-                          "(set PEERS_STORAGE_TOKEN). The file was not sent."));
+    if (bytes.size() > maxHostedPlaintextBytes()) {
+        cb(false, {}, QStringLiteral("That media is too large."));
         return;
     }
-
     // 1. Pad first, so the ciphertext length reveals a bucket, not a fingerprint.
     const QByteArray plain = MediaPadding::pad(bytes);
 
@@ -168,35 +424,132 @@ void StorageClient::uploadEncrypted(const QByteArray& bytes, UploadCb cb)
 
     // 3. blob = iv || ct || tag  (Java appends the tag to the ciphertext)
     const QByteArray blob = iv + ct + tag;
-
-    QNetworkRequest req{ QUrl(storageBase() + QStringLiteral("/data")) };
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/octet-stream"));
-    req.setRawHeader("Authorization", "Bearer " + storageToken().toUtf8());
-
-    QNetworkReply* reply = m_net->post(req, blob);
     const QString keyB64 = QString::fromLatin1(key.toBase64());
+    if (blob.isEmpty() || blob.size() > kMaxCiphertextBytes) {
+        cb(false, {}, QStringLiteral("That media is too large."));
+        return;
+    }
 
-    connect(reply, &QNetworkReply::finished, this, [reply, cb, keyB64]() {
-        reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
-            cb(false, {},
-               QStringLiteral("Upload failed: %1").arg(reply->errorString()));
+    QNetworkRequest challengeRequest{
+        QUrl(storageBase() + QStringLiteral("/data/upload-challenges"))
+    };
+    challengeRequest.setTransferTimeout(30000);
+    postBounded(challengeRequest, {}, [this, blob, keyB64, cb](
+                                          bool challengeOk, QByteArray challengeBody, QString error) {
+        if (!challengeOk) {
+            cb(false, {}, error);
             return;
         }
-        // Response body is "<cid>:<cap>", split on the FIRST colon; no colon
-        // means no cap (StorageModule.kt:138-144).
-        const QString body = QString::fromUtf8(reply->readAll()).trimmed();
-        const int colon = body.indexOf(QLatin1Char(':'));
-        Uploaded u;
-        u.cid = colon < 0 ? body : body.left(colon);
-        u.cap = colon < 0 ? QString() : body.mid(colon + 1);
-        u.keyB64 = keyB64;
-
-        if (!validCid(u.cid)) {
-            cb(false, {}, QStringLiteral("The storage node returned an unusable id."));
+        QJsonObject challengeJson;
+        QHash<QString, QByteArray> challengeTokens;
+        if (!strictObject(challengeBody,
+                          { QStringLiteral("challenge"), QStringLiteral("difficulty"),
+                            QStringLiteral("expires_at") },
+                          &challengeJson, &challengeTokens)) {
+            cb(false, {}, QStringLiteral("The storage node returned an invalid challenge."));
             return;
         }
-        cb(true, u, QString());
+        const QString challenge = challengeJson.value(QStringLiteral("challenge")).toString();
+        qint64 difficulty64 = 0;
+        qint64 expiresAt = 0;
+        const qint64 now = QDateTime::currentSecsSinceEpoch();
+        if (!validOpaque64(challenge)
+            || !exactIntegerToken(challengeTokens.value(QStringLiteral("difficulty")), &difficulty64)
+            || difficulty64 < 1 || difficulty64 > kMaxProofDifficulty
+            || !exactIntegerToken(challengeTokens.value(QStringLiteral("expires_at")), &expiresAt)
+            || expiresAt <= now || expiresAt > now + kMaxClockHorizonSeconds) {
+            cb(false, {}, QStringLiteral("The storage node returned invalid challenge caveats."));
+            return;
+        }
+
+        const auto nonce = std::make_shared<qint64>(-1);
+        const qint64 proofBudgetMillis = (expiresAt - now) * 1000;
+        QThread* worker = QThread::create([nonce, challenge, bytes = blob.size(),
+                                           difficulty = static_cast<int>(difficulty64),
+                                           proofBudgetMillis] {
+            *nonce = solveProof(challenge, bytes, difficulty, proofBudgetMillis);
+        });
+        connect(worker, &QThread::finished, worker, &QObject::deleteLater);
+        connect(worker, &QThread::finished, this,
+                [this, blob, keyB64, cb, challenge, expiresAt, nonce] {
+            if (*nonce < 0 || QDateTime::currentSecsSinceEpoch() >= expiresAt) {
+                cb(false, {}, QStringLiteral("The upload challenge expired."));
+                return;
+            }
+            QJsonObject proof;
+            proof.insert(QStringLiteral("challenge"), challenge);
+            proof.insert(QStringLiteral("bytes"), blob.size());
+            proof.insert(QStringLiteral("nonce"), *nonce);
+            QNetworkRequest grantRequest{
+                QUrl(storageBase() + QStringLiteral("/data/upload-grants"))
+            };
+            grantRequest.setHeader(QNetworkRequest::ContentTypeHeader,
+                                   QStringLiteral("application/json"));
+            grantRequest.setTransferTimeout(30000);
+            postBounded(grantRequest, QJsonDocument(proof).toJson(QJsonDocument::Compact),
+                        [this, blob, keyB64, cb](bool grantOk, QByteArray grantBody,
+                                                QString grantError) {
+                if (!grantOk) {
+                    cb(false, {}, grantError);
+                    return;
+                }
+                QJsonObject grantJson;
+                QHash<QString, QByteArray> grantTokens;
+                if (!strictObject(grantBody,
+                                  { QStringLiteral("grant"), QStringLiteral("max_bytes"),
+                                    QStringLiteral("expires_at") },
+                                  &grantJson, &grantTokens)) {
+                    cb(false, {}, QStringLiteral("The storage node returned an invalid grant."));
+                    return;
+                }
+                const QString grant = grantJson.value(QStringLiteral("grant")).toString();
+                qint64 maxBytes = 0;
+                qint64 grantExpiresAt = 0;
+                const qint64 grantNow = QDateTime::currentSecsSinceEpoch();
+                if (!validOpaque64(grant)
+                    || !exactIntegerToken(grantTokens.value(QStringLiteral("max_bytes")), &maxBytes)
+                    || maxBytes != blob.size()
+                    || !exactIntegerToken(grantTokens.value(QStringLiteral("expires_at")),
+                                          &grantExpiresAt)
+                    || grantExpiresAt <= grantNow
+                    || grantExpiresAt > grantNow + kMaxClockHorizonSeconds) {
+                    cb(false, {}, QStringLiteral("The storage node returned invalid grant caveats."));
+                    return;
+                }
+
+                QNetworkRequest uploadRequest{
+                    QUrl(storageBase() + QStringLiteral("/data"))
+                };
+                uploadRequest.setHeader(QNetworkRequest::ContentTypeHeader,
+                                        QStringLiteral("application/octet-stream"));
+                uploadRequest.setRawHeader("X-Upload-Grant", grant.toUtf8());
+                uploadRequest.setTransferTimeout(120000);
+                postBounded(uploadRequest, blob,
+                            [cb, keyB64](bool uploadOk, QByteArray uploadBody,
+                                        QString uploadError) {
+                    if (!uploadOk) {
+                        cb(false, {}, uploadError);
+                        return;
+                    }
+                    const QString body = QString::fromUtf8(uploadBody);
+                    const int colon = body.indexOf(QLatin1Char(':'));
+                    if (colon <= 0 || colon != body.lastIndexOf(QLatin1Char(':'))) {
+                        cb(false, {}, QStringLiteral("The storage node returned an unusable id."));
+                        return;
+                    }
+                    Uploaded uploaded;
+                    uploaded.cid = body.left(colon);
+                    uploaded.cap = body.mid(colon + 1);
+                    uploaded.keyB64 = keyB64;
+                    if (!validCid(uploaded.cid) || !validUploadCapability(uploaded.cap)) {
+                        cb(false, {}, QStringLiteral("The storage node returned an unusable id."));
+                        return;
+                    }
+                    cb(true, uploaded, QString());
+                });
+            });
+        });
+        worker->start();
     });
 }
 
@@ -239,14 +592,45 @@ void StorageClient::downloadDecrypt(const QString& cid, const QString& keyB64, c
     }
 
     QNetworkRequest req{ url };
+    req.setTransferTimeout(60000);
     if (!storageToken().isEmpty() && cap.isEmpty())
         req.setRawHeader("Authorization", "Bearer " + storageToken().toUtf8());
 
     QNetworkReply* reply = m_net->get(req);
     const QByteArray key = QByteArray::fromBase64(keyB64.toLatin1());
+    const auto received = std::make_shared<QByteArray>();
+    const auto oversized = std::make_shared<bool>(false);
 
-    connect(reply, &QNetworkReply::finished, this, [reply, cb, key, cachePath]() {
+    connect(reply, &QNetworkReply::metaDataChanged, this, [reply, oversized] {
+        bool ok = false;
+        const qint64 declared =
+            reply->header(QNetworkRequest::ContentLengthHeader).toLongLong(&ok);
+        if (ok && declared > kMaxCiphertextBytes) {
+            *oversized = true;
+            reply->abort();
+        }
+    });
+    connect(reply, &QIODevice::readyRead, this, [reply, received, oversized] {
+        const qint64 remaining = kMaxCiphertextBytes + 1 - received->size();
+        if (remaining > 0)
+            received->append(reply->read(remaining));
+        if (received->size() > kMaxCiphertextBytes || reply->bytesAvailable() > 0) {
+            *oversized = true;
+            reply->abort();
+        }
+    });
+    connect(reply, &QNetworkReply::finished, this,
+            [reply, cb, key, cachePath, received, oversized]() {
+        const qint64 remaining = kMaxCiphertextBytes + 1 - received->size();
+        if (remaining > 0)
+            received->append(reply->read(remaining));
         reply->deleteLater();
+
+        if (*oversized || received->size() > kMaxCiphertextBytes
+            || reply->bytesAvailable() > 0) {
+            cb(false, QString(), QStringLiteral("That media is too large."));
+            return;
+        }
 
         const int status =
             reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
@@ -270,11 +654,7 @@ void StorageClient::downloadDecrypt(const QString& cid, const QString& keyB64, c
             return;
         }
 
-        const QByteArray blob = reply->readAll();
-        if (blob.size() > kMaxCiphertextBytes) {
-            cb(false, QString(), QStringLiteral("That media is too large."));
-            return;
-        }
+        const QByteArray& blob = *received;
         if (blob.size() <= kIvLen + kTagLen) {
             cb(false, QString(), QStringLiteral("That media is truncated."));
             return;
