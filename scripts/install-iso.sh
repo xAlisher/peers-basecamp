@@ -25,10 +25,12 @@ cd "$(dirname "$0")/.."
 SC=""
 SC2=""
 CORE_NEW=""
+UI_NEW=""
 cleanup() {
   [ -z "$SC" ] || rm -rf "$SC"
   [ -z "$SC2" ] || rm -rf "$SC2"
   [ -z "$CORE_NEW" ] || rm -rf "$CORE_NEW"
+  [ -z "$UI_NEW" ] || rm -rf "$UI_NEW"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -61,12 +63,16 @@ UI_LGX=$(find /extra/tmp/peers-ui-lgx/ -name '*.lgx' | head -1)
 
 SC=$(mktemp -d /extra/tmp/peers-lgx-XXXX)
 tar xzf "$UI_LGX" -C "$SC"
-mkdir -p "$GUI/plugins/peers_ui"
-chmod -R u+w "$GUI/plugins/peers_ui"
-cp -rf "$SC/variants/linux-amd64/." "$GUI/plugins/peers_ui/"
-cp -f  "$SC/manifest.json" "$GUI/plugins/peers_ui/manifest.json"
-printf 'linux-amd64' > "$GUI/plugins/peers_ui/variant"
-chmod -R u+w "$GUI/plugins/peers_ui"
+UI_DEST="$GUI/plugins/peers_ui"
+UI_NEW="$GUI/plugins/.peers_ui.new.$$"
+rm -rf "$UI_NEW"
+mkdir -p "$UI_NEW"
+cp -rf "$SC/variants/linux-amd64/." "$UI_NEW/"
+cp -f "$SC/manifest.json" "$UI_NEW/manifest.json"
+printf 'linux-amd64' > "$UI_NEW/variant"
+chmod -R u+w "$UI_NEW"
+python3 -B scripts/install_ui_package.py "$UI_NEW" "$UI_DEST"
+UI_NEW=""
 echo "  plugins/peers_ui  ok"
 
 # ── the core module it depends on ───────────────────────────────────────────

@@ -10,6 +10,8 @@ const installerPath = resolve(root, 'scripts/install-iso.sh');
 const replacerPath = resolve(root, 'scripts/atomic_replace.py');
 const validatorPath = resolve(root, 'scripts/validate_core_package.py');
 const coreInstallerPath = resolve(root, 'scripts/install_core_package.py');
+const uiValidatorPath = resolve(root, 'scripts/validate_ui_package.py');
+const uiInstallerPath = resolve(root, 'scripts/install_ui_package.py');
 const targetValidatorPath = resolve(root, 'scripts/validate_iso_target.py');
 const source = fs.readFileSync(installerPath, 'utf8');
 let failed = false;
@@ -26,6 +28,7 @@ requirePattern(/set -euo pipefail/, 'installer is not fail-fast');
 requirePattern(/flake\.lock[\s\S]*?peers_core[\s\S]*?rev/, 'installer does not resolve the pinned peers_core revision');
 requirePattern(/github:xAlisher\/peers-core\/\$\{?CORE_REV\}?/, 'installer does not build the pinned peers_core revision');
 requirePattern(/install_core_package\.py"?\s+"\$CORE_NEW"\s+"\$CORE_DEST"/, 'installer does not validate then atomically replace peers_core');
+requirePattern(/install_ui_package\.py"?\s+"\$UI_NEW"\s+"\$UI_DEST"/, 'installer does not validate then atomically replace peers_ui');
 requirePattern(/ISO=\$\(python3 scripts\/validate_iso_target\.py "\$ISO"\)[\s\S]{0,120}?GUI="\$ISO\/data\/Logos\/LogosBasecamp"/, 'installer does not canonicalize and validate the isolated target');
 requirePattern(/artifact_identity\.py[\s\S]{0,500}?--ui-lgx[\s\S]{0,500}?--core-lgx[\s\S]{0,500}?--appimage/, 'final install cannot generate an artifact identity report');
 requirePattern(/\[ -s "\$CORE_NEW\/manifest\.json" \]/, 'installer does not validate its staged manifest');
@@ -82,8 +85,9 @@ if (!fs.existsSync(replacerPath)) {
   }
 }
 
-if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)) {
-  fail('core package validator or validate-then-replace helper is missing');
+if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)
+    || !fs.existsSync(uiValidatorPath) || !fs.existsSync(uiInstallerPath)) {
+  fail('package validator or validate-then-replace helper is missing');
 } else {
   const work = fs.mkdtempSync('/extra/tmp/peers-package-test-');
   try {
@@ -159,6 +163,47 @@ if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)) {
     if (installed.status !== 0) fail(`valid package install failed: ${installed.stderr.trim()}`);
     if (!fs.existsSync(resolve(dest, 'peers_core_plugin.so')) || fs.existsSync(resolve(dest, 'version')))
       fail('valid package did not atomically replace the working core');
+
+    const uiValid = resolve(work, 'valid-ui');
+    fs.cpSync(valid, uiValid, {recursive: true});
+    fs.renameSync(resolve(uiValid, 'peers_core_plugin.so'), resolve(uiValid, 'peers_ui_plugin.so'));
+    const replica = spawnSync('cc', ['-shared', '-fPIC', '-x', 'c', '-', '-o',
+      resolve(uiValid, 'peers_ui_replica_factory.so')], {input: 'int replica(void) { return 1; }', encoding: 'utf8'});
+    if (replica.status !== 0) fail(`could not compile replica factory: ${replica.stderr.trim()}`);
+    fs.mkdirSync(resolve(uiValid, 'qml'));
+    fs.writeFileSync(resolve(uiValid, 'qml/PeersView.qml'), 'import QtQuick\nItem {}');
+    fs.writeFileSync(resolve(uiValid, 'Peers_sidebar.png'), 'png');
+    fs.writeFileSync(resolve(uiValid, 'metadata.json'), '{}');
+    fs.writeFileSync(resolve(uiValid, 'manifest.json'), JSON.stringify({
+      name: 'peers_ui', type: 'ui_qml', dependencies: ['peers_core', 'delivery_module'],
+      main: {'linux-amd64': 'peers_ui_plugin.so'}, view: 'qml/PeersView.qml',
+      icon: 'Peers_sidebar.png',
+    }));
+    const uiDest = resolve(work, 'peers_ui');
+    fs.mkdirSync(uiDest);
+    fs.writeFileSync(resolve(uiDest, 'version'), 'working');
+    function expectUiRejected(label, mutate) {
+      const staged = resolve(work, `.peers_ui.reject-${caseNumber++}`);
+      fs.cpSync(uiValid, staged, {recursive: true});
+      mutate(staged);
+      const result = spawnSync('python3', [uiInstallerPath, staged, uiDest], {encoding: 'utf8'});
+      if (result.status === 0) fail(`${label} reached UI atomic replacement`);
+      if (fs.readFileSync(resolve(uiDest, 'version'), 'utf8') !== 'working')
+        fail(`${label} damaged the working UI`);
+      fs.rmSync(staged, {recursive: true, force: true});
+    }
+    expectUiRejected('missing UI plugin', staged => fs.rmSync(resolve(staged, 'peers_ui_plugin.so')));
+    expectUiRejected('symlinked UI view', staged => {
+      fs.rmSync(resolve(staged, 'qml/PeersView.qml'));
+      fs.symlinkSync(resolve(uiValid, 'qml/PeersView.qml'), resolve(staged, 'qml/PeersView.qml'));
+    });
+    expectUiRejected('wrong UI manifest', staged => fs.writeFileSync(resolve(staged, 'manifest.json'), '{}'));
+    const uiInstallable = resolve(work, '.peers_ui.valid');
+    fs.cpSync(uiValid, uiInstallable, {recursive: true});
+    const uiInstalled = spawnSync('python3', [uiInstallerPath, uiInstallable, uiDest], {encoding: 'utf8'});
+    if (uiInstalled.status !== 0) fail(`valid UI package install failed: ${uiInstalled.stderr.trim()}`);
+    if (!fs.existsSync(resolve(uiDest, 'peers_ui_plugin.so')) || fs.existsSync(resolve(uiDest, 'version')))
+      fail('valid UI package did not atomically replace the working UI');
   } finally {
     fs.rmSync(work, {recursive: true, force: true});
   }
@@ -220,4 +265,4 @@ if (!fs.existsSync(targetValidatorPath)) {
 }
 
 if (failed) process.exit(1);
-console.log('ok: isolated installer atomically updates the pinned peers_core package');
+console.log('ok: isolated installer atomically updates validated peers_ui and pinned peers_core packages');
