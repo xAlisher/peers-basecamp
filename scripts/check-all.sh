@@ -39,6 +39,16 @@ c++ -std=c++17 -Wall -Wextra -Werror \
   && "$bounds_test"; rc=$?
 rm -f "$bounds_test"
 [ $rc -ne 0 ] && fail=1
+echo "== truthful media Save =="
+save_test=$(mktemp "${TMPDIR:-/extra/tmp}/peers-media-save-XXXXXX")
+c++ -std=c++17 -Wall -Wextra -Werror \
+  -Iplugins/peers_ui/src \
+  tests/media-save.cpp plugins/peers_ui/src/MediaSave.cpp \
+  plugins/peers_ui/src/ContentMarkers.cpp \
+  $(pkg-config --cflags --libs Qt6Core) -o "$save_test" \
+  && "$save_test"; rc=$?
+rm -f "$save_test"
+[ $rc -ne 0 ] && fail=1
 echo "== isolated installer dependency pin =="
 node tests/install-iso.mjs; rc=$?
 [ $rc -ne 0 ] && fail=1

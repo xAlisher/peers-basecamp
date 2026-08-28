@@ -155,12 +155,16 @@ if (!/const bool hostedVoice\s*=\s*hmime\.startsWith\(QLatin1String\("audio\/"\)
 if (!/if \(row\.contains\(QStringLiteral\("cid"\)\)\)/.test(backend)
     || !/deferToEventLoop\([\s\S]{0,300}?fetchHostedMedia\(/.test(backend))
   fail('hosted voice rows do not enter the encrypted media downloader');
+if (!/row\.remove\(QStringLiteral\("cid"\)\)/.test(backend))
+  fail('raw hosted CID can reach the QML view model');
+const sendMessageSource = backend.match(/void PeersUiBackend::sendMessage\([\s\S]*?\n}\n/)?.[0] ?? '';
+if (!/!ContentMarkers::containsHostedReference\(content\)/.test(sendMessageSource))
+  fail('generic send can restore a hosted capability to the composer');
 const saveMediaSource = backend.match(/void PeersUiBackend::saveMedia\([\s\S]*?\n}\n/)?.[0] ?? '';
-if (!/const bool hosted\s*=\s*o\.contains\(QStringLiteral\("cid"\)\)/.test(saveMediaSource)
-    || !/if \(hosted && \(kind == QLatin1String\("media"\) \|\| kind == QLatin1String\("voice"\)\)\)/.test(saveMediaSource)
-    || !/bytes = f\.readAll\(\)/.test(saveMediaSource)
-    || !/else if \(kind == QLatin1String\("photo"\) \|\| kind == QLatin1String\("voice"\)\)/.test(saveMediaSource))
+if (!/MediaSave::payloadBytes\(/.test(saveMediaSource))
   fail('hosted voice Save does not preserve decrypted cache bytes separately from inline voice');
+if (!/MediaSave::writeAtomically\(/.test(saveMediaSource))
+  fail('media Save can report success after a short or failed destination write');
 if (!/#include "StorageBounds\.h"/.test(storageClient)
     || !/const qint64 maxCiphertextBytes\s*=\s*StorageBounds::maxCiphertextBytesForMime\(mime\)/.test(storageClient)
     || !/StorageBounds::validCacheFileSize\(cached\.size\(\), mime\)/.test(storageClient)
