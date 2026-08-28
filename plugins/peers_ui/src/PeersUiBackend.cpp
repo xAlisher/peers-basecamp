@@ -18,6 +18,7 @@
 
 #include "BackupReader.h"
 #include "GifSafety.h"
+#include "HostedBoundary.h"
 #include "MediaSave.h"
 #include "StorageClient.h"
 #include "MediaTools.h"
@@ -469,7 +470,7 @@ bool PeersUiBackend::loadMessages(const QString& convoId)
             }
             // The backend retains the raw marker in m_rawByKey and the CID-keyed cache maps.
             // QML needs only localPath/imageUri/mediaError and must never receive the CID.
-            row.remove(QStringLiteral("cid"));
+            HostedBoundary::sanitizeViewRow(&row);
         }
 
         // An inline PHOTO arrives as base64 too, and cannot be handed to QML as a
@@ -673,7 +674,7 @@ void PeersUiBackend::createConversation(QString peerAddress)
 void PeersUiBackend::sendMessage(QString conversationId, QString content)
 {
     sendMessageInternal(conversationId, content,
-                        !ContentMarkers::containsHostedReference(content));
+                        HostedBoundary::restoreToComposer(content));
 }
 
 bool PeersUiBackend::sendMessageInternal(const QString& conversationId, const QString& content,

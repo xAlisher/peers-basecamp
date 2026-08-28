@@ -155,16 +155,18 @@ if (!/const bool hostedVoice\s*=\s*hmime\.startsWith\(QLatin1String\("audio\/"\)
 if (!/if \(row\.contains\(QStringLiteral\("cid"\)\)\)/.test(backend)
     || !/deferToEventLoop\([\s\S]{0,300}?fetchHostedMedia\(/.test(backend))
   fail('hosted voice rows do not enter the encrypted media downloader');
-if (!/row\.remove\(QStringLiteral\("cid"\)\)/.test(backend))
+if (!/HostedBoundary::sanitizeViewRow\(&row\)/.test(backend))
   fail('raw hosted CID can reach the QML view model');
 const sendMessageSource = backend.match(/void PeersUiBackend::sendMessage\([\s\S]*?\n}\n/)?.[0] ?? '';
-if (!/!ContentMarkers::containsHostedReference\(content\)/.test(sendMessageSource))
+if (!/HostedBoundary::restoreToComposer\(content\)/.test(sendMessageSource))
   fail('generic send can restore a hosted capability to the composer');
 const saveMediaSource = backend.match(/void PeersUiBackend::saveMedia\([\s\S]*?\n}\n/)?.[0] ?? '';
 if (!/MediaSave::payloadBytes\(/.test(saveMediaSource))
   fail('hosted voice Save does not preserve decrypted cache bytes separately from inline voice');
 if (!/MediaSave::writeAtomically\(/.test(saveMediaSource))
   fail('media Save can report success after a short or failed destination write');
+if (!/MediaSave::writeAtomically\(cachePath,\s*unpadded,\s*&cacheError\)/.test(storageClient))
+  fail('decrypted media cache can publish a short or failed write as successful');
 if (!/#include "StorageBounds\.h"/.test(storageClient)
     || !/const qint64 maxCiphertextBytes\s*=\s*StorageBounds::maxCiphertextBytesForMime\(mime\)/.test(storageClient)
     || !/StorageBounds::validCacheFileSize\(cached\.size\(\), mime\)/.test(storageClient)

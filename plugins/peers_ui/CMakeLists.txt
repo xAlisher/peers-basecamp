@@ -16,6 +16,7 @@ logos_module(
         src/PeersUiBackend.cpp
         src/ContentMarkers.h
         src/ContentMarkers.cpp
+        src/HostedBoundary.h
         src/BackupReader.h
         src/BackupReader.cpp
         src/MediaPadding.h
