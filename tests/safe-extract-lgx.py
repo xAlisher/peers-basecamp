@@ -43,7 +43,7 @@ def run_case(root: Path, label: str, build, should_pass: bool) -> None:
 
 
 def valid(package: tarfile.TarFile) -> None:
-    for name in ("variants", "variants/linux-amd64"):
+    for name in ("variants", "variants/linux-amd64", "variants/linux-amd64/qml"):
         directory = tarfile.TarInfo(name)
         directory.type = tarfile.DIRTYPE
         directory.mode = 0o755

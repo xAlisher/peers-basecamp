@@ -45,7 +45,8 @@ def extract(archive: Path, destination: Path) -> None:
             if not member.isdir() and not member.isfile():
                 raise ValueError(f"package contains link or special node: {path}")
             if member.isdir():
-                if path not in {PurePosixPath("variants"), VARIANT_PREFIX}:
+                if path not in {PurePosixPath("variants"), VARIANT_PREFIX} \
+                        and VARIANT_PREFIX not in path.parents:
                     raise ValueError(f"unexpected package directory: {path}")
             elif path != PurePosixPath("manifest.json") and VARIANT_PREFIX not in path.parents:
                 raise ValueError(f"unexpected package file: {path}")
