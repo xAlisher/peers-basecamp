@@ -47,6 +47,9 @@ int main()
             "malformed relay fails closed");
     require(ContentMarkers::containsHostedReference(QStringLiteral("pfp1:clear:") + hosted),
             "malformed avatar clear fails closed");
+    require(ContentMarkers::containsHostedReference(
+                reply(QStringLiteral("pfp1:clear:") + hosted)),
+            "reply-wrapped malformed avatar clear fails closed");
     require(ContentMarkers::containsHostedReference(QStringLiteral("pfp1:ordinary text")),
             "malformed avatar body fails closed");
 
