@@ -22,6 +22,7 @@ logos_module(
         src/MediaPadding.cpp
         src/StorageClient.h
         src/StorageClient.cpp
+        src/StorageBounds.h
         src/VoiceRecorder.h
         src/VoiceRecorder.cpp
         src/MediaTools.h

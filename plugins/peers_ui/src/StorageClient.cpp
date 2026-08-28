@@ -1,6 +1,7 @@
 #include "StorageClient.h"
 
 #include "MediaTools.h"
+#include "StorageBounds.h"
 
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -36,7 +37,7 @@ constexpr int kTagLen = 16;     // TAG_BITS = 128
 constexpr int kKeyLen = 32;
 // StorageRef.kt:28 — refuse anything larger up front rather than streaming it
 // into memory.
-constexpr qint64 kMaxCiphertextBytes = 100LL * 1024 * 1024;
+constexpr qint64 kMaxCiphertextBytes = StorageBounds::maxGeneralCiphertextBytes;
 constexpr qint64 kMaxSmallResponseBytes = 4096;
 constexpr int kMaxProofDifficulty = 24;
 constexpr qint64 kMaxClockHorizonSeconds = 2 * 60;
@@ -574,12 +575,18 @@ void StorageClient::downloadDecrypt(const QString& cid, const QString& keyB64, c
         return;
     }
 
+    const qint64 maxCiphertextBytes = StorageBounds::maxCiphertextBytesForMime(mime);
+
     const QString cachePath = cacheFileFor(cid, mime);
     {
         QFile cached(cachePath);
         // A non-empty cache file short-circuits the whole fetch.
-        if (cached.exists() && cached.size() > 0) {
+        if (cached.exists() && StorageBounds::validCacheFileSize(cached.size(), mime)) {
             cb(true, cachePath, QString());
+            return;
+        }
+        if (cached.exists() && cached.size() > 0) {
+            cb(false, QString(), QStringLiteral("That media is too large."));
             return;
         }
     }
@@ -609,32 +616,34 @@ void StorageClient::downloadDecrypt(const QString& cid, const QString& keyB64, c
     const auto received = std::make_shared<QByteArray>();
     const auto oversized = std::make_shared<bool>(false);
 
-    connect(reply, &QNetworkReply::metaDataChanged, this, [reply, oversized] {
+    connect(reply, &QNetworkReply::metaDataChanged, this,
+            [reply, oversized, maxCiphertextBytes] {
         bool ok = false;
         const qint64 declared =
             reply->header(QNetworkRequest::ContentLengthHeader).toLongLong(&ok);
-        if (ok && declared > kMaxCiphertextBytes) {
+        if (ok && declared > maxCiphertextBytes) {
             *oversized = true;
             reply->abort();
         }
     });
-    connect(reply, &QIODevice::readyRead, this, [reply, received, oversized] {
-        const qint64 remaining = kMaxCiphertextBytes + 1 - received->size();
+    connect(reply, &QIODevice::readyRead, this,
+            [reply, received, oversized, maxCiphertextBytes] {
+        const qint64 remaining = maxCiphertextBytes + 1 - received->size();
         if (remaining > 0)
             received->append(reply->read(remaining));
-        if (received->size() > kMaxCiphertextBytes || reply->bytesAvailable() > 0) {
+        if (received->size() > maxCiphertextBytes || reply->bytesAvailable() > 0) {
             *oversized = true;
             reply->abort();
         }
     });
     connect(reply, &QNetworkReply::finished, this,
-            [reply, cb, key, cachePath, received, oversized]() {
-        const qint64 remaining = kMaxCiphertextBytes + 1 - received->size();
+            [reply, cb, key, cachePath, received, oversized, maxCiphertextBytes]() {
+        const qint64 remaining = maxCiphertextBytes + 1 - received->size();
         if (remaining > 0)
             received->append(reply->read(remaining));
         reply->deleteLater();
 
-        if (*oversized || received->size() > kMaxCiphertextBytes
+        if (*oversized || received->size() > maxCiphertextBytes
             || reply->bytesAvailable() > 0) {
             cb(false, QString(), QStringLiteral("That media is too large."));
             return;
