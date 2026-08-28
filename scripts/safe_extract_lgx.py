@@ -44,6 +44,7 @@ def extract(archive: Path, destination: Path) -> None:
             seen.add(path)
             if path != PurePosixPath("manifest.json") \
                     and path != VARIANT_PREFIX \
+                    and path not in VARIANT_PREFIX.parents \
                     and VARIANT_PREFIX not in path.parents:
                 raise ValueError(f"unexpected package path: {path}")
             if not member.isdir() and not member.isfile():

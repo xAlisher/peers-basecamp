@@ -43,6 +43,11 @@ def run_case(root: Path, label: str, build, should_pass: bool) -> None:
 
 
 def valid(package: tarfile.TarFile) -> None:
+    for name in ("variants", "variants/linux-amd64"):
+        directory = tarfile.TarInfo(name)
+        directory.type = tarfile.DIRTYPE
+        directory.mode = 0o755
+        package.addfile(directory)
     add_bytes(package, "manifest.json", b"{}")
     add_bytes(package, "variants/linux-amd64/plugin.so", b"elf")
 
