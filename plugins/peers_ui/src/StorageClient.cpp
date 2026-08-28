@@ -360,6 +360,14 @@ QString StorageClient::cacheSuffixForMime(const QString& mime)
         return QStringLiteral(".webp");
     if (lower == QLatin1String("image/bmp"))
         return QStringLiteral(".bmp");
+    if (lower == QLatin1String("audio/mp4"))
+        return QStringLiteral(".m4a");
+    if (lower == QLatin1String("audio/mpeg"))
+        return QStringLiteral(".mp3");
+    if (lower == QLatin1String("audio/ogg"))
+        return QStringLiteral(".ogg");
+    if (lower == QLatin1String("audio/wav") || lower == QLatin1String("audio/x-wav"))
+        return QStringLiteral(".wav");
     return QStringLiteral(".bin");
 }
 

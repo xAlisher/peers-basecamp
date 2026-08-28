@@ -1,10 +1,13 @@
 #ifndef PEERS_UI_BACKEND_H
 #define PEERS_UI_BACKEND_H
 
+#include <QByteArray>
 #include <QDateTime>
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QQueue>
+#include <QSet>
 #include <QString>
 #include <QVariantList>
 #include <functional>
@@ -75,6 +78,8 @@ public:
     void startRecording() override;
     void cancelRecording() override;
     void sendRecording(QString conversationId) override;
+    void retryVoice() override;
+    void discardVoice() override;
 
     // ── groups ──────────────────────────────────────────────────────────────
     void createGroupConversation(QString name, QString description) override;
@@ -114,6 +119,8 @@ protected:
 
 private:
     // ── lifecycle ───────────────────────────────────────────────────────────
+    bool sendMessageInternal(const QString& conversationId, const QString& content,
+                             bool restoreToComposer);
     void initialiseModule();
     void subscribeToEvents();
     void startHealthProbe();
@@ -150,6 +157,9 @@ private:
     // Fetch + decrypt a hosted blob, then re-render the thread.
     void fetchHostedMedia(const QString& convoId, const QString& cid, const QString& keyB64,
                           const QString& cap, const QString& mime);
+    void generateVideoThumbnail(const QString& convoId, const QString& cid,
+                                const QString& videoPath);
+    void startNextVideoThumbnail();
 
     // Persisted app state (settings, drafts, contacts, PIN verifier) under the
     // host-assigned instance directory.
@@ -182,6 +192,11 @@ private:
     StorageClient* m_storage = nullptr;
     // Microphone capture for voice notes. Null until the first record.
     VoiceRecorder* m_recorder = nullptr;
+    void uploadPendingVoice();
+    QByteArray m_pendingVoiceBytes;
+    QString m_pendingVoiceMime;
+    QString m_pendingVoiceConversationId;
+    int m_pendingVoiceDurationMs = 0;
     // Audio playback. The host bundles no Qt Multimedia (verified against the
     // running process: Core/Gui/Quick/Widgets are there, Multimedia is not), so
     // a voice note is played by a HEADLESS player process — no window opens and
@@ -195,11 +210,22 @@ private:
     // cid → local decrypted file, so a fetched blob is handed to the view
     // without going near the network again.
     QHash<QString, QString> m_mediaPaths;
+    // cid → generated first-frame JPEG. Extraction is asynchronous and bounded;
+    // failure deliberately leaves the existing play placeholder intact.
+    QHash<QString, QString> m_videoThumbnailPaths;
+    struct VideoThumbnailJob {
+        QString convoId;
+        QString cid;
+        QString videoPath;
+    };
+    QQueue<VideoThumbnailJob> m_thumbnailQueue;
+    QProcess* m_thumbnailProcess = nullptr;
+    QSet<QString> m_thumbnailing;
     // cid → terminal fetch/decrypt error. Exposed with the decoded row so the
     // view does not claim to be downloading forever after a known failure.
     QHash<QString, QString> m_mediaErrors;
     // key -> the RAW stored body of the loaded conversation's messages, so an
-    // action (forward, copy, save) can work on what was actually sent rather
+    // backend-only actions (forward, save) can work on what was actually sent rather
     // than on the decoded display text.
     QHash<QString, QString> m_rawByKey;
     // Keys hidden by "delete for me". LOCAL ONLY — Peers has no remote unsend,

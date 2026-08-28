@@ -1,0 +1,47 @@
+# Inspector-build smoke coverage for Peers. Sitometres always stages into a
+# throwaway Basecamp profile; this spec contains no identities, addresses, keys,
+# capabilities, CIDs, or message contents.
+#
+# This complements, but never replaces, the mandatory shipping-AppImage test:
+# release AppImages do not contain the QML inspector.
+app: peers_ui
+with: [peers_core, delivery_module]
+timeout: 90s
+
+steps:
+  - name: Peers opens with its backend attached
+    open: peers_ui
+    expect:
+      state:
+        - "root.objectName === 'peersRoot'"
+        - "root.ready === true"
+      no_errors: true
+
+  - name: Contacts navigation is wired
+    click: { objectName: "nav-contacts" }
+    expect:
+      text: ["Contacts"]
+      state: "root.section === 'contacts'"
+      no_errors: true
+
+  - name: Settings navigation is wired
+    click: { objectName: "nav-settings" }
+    expect:
+      text: ["Settings"]
+      state: "root.section === 'settings'"
+      no_errors: true
+
+  - name: Chats navigation returns to the empty conversation state
+    click: { objectName: "nav-chats" }
+    expect:
+      text: ["No conversations yet"]
+      state: "root.section === 'chats'"
+      no_errors: true
+
+  - name: Capture the isolated Peers shell
+    screenshot: "peers-shell"
+    expect:
+      state:
+        - "root.section === 'chats'"
+        - "root.conversations.length === 0"
+      no_errors: true

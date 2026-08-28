@@ -26,6 +26,7 @@ logos_module(
         src/VoiceRecorder.cpp
         src/MediaTools.h
         src/MediaTools.cpp
+        src/GifSafety.h
     INCLUDE_DIRS
         src
 )

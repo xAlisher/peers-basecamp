@@ -22,6 +22,8 @@ Rectangle {
     // GIFs must keep animating in the full-pane viewer. Plain photos continue to
     // use Image so they retain the cheaper asynchronous decode path.
     property bool animated: false
+    property int decodeWidth: 0
+    property int decodeHeight: 0
 
     // Every image in the conversation, as [{ uri, key }], so the viewer can page
     // the way Android's pager does. `index` selects one; with no list the viewer
@@ -33,6 +35,10 @@ Rectangle {
     readonly property string current: paged ? images[index].uri : source
     readonly property string currentKey: paged ? images[index].key : ""
     readonly property bool currentAnimated: paged ? images[index].animated === true : animated
+    readonly property int currentDecodeWidth: paged ? Number(images[index].decodeWidth || 0)
+                                                    : decodeWidth
+    readonly property int currentDecodeHeight: paged ? Number(images[index].decodeHeight || 0)
+                                                     : decodeHeight
     readonly property int currentStatus: currentAnimated ? animation.status : photo.status
 
     signal closed
@@ -120,7 +126,8 @@ Rectangle {
         anchors.fill: parent
         anchors.margins: Theme.space6
         visible: root.currentAnimated
-        source: visible ? root.current : ""
+        source: visible && root.currentDecodeWidth > 0 && root.currentDecodeHeight > 0
+                ? root.current : ""
         fillMode: Image.PreserveAspectFit
         scale: root.zoom
         transformOrigin: Item.Center
@@ -128,8 +135,10 @@ Rectangle {
         y: root.panY
         playing: visible
         cache: false
-        sourceSize.width: 1600
-        sourceSize.height: 1600
+        // Both axes come from the actual local GIF header and are bounded before
+        // QML receives a source. This preserves ratio without an unbounded axis.
+        sourceSize.width: root.currentDecodeWidth
+        sourceSize.height: root.currentDecodeHeight
         horizontalAlignment: Image.AlignHCenter
         verticalAlignment: Image.AlignVCenter
         Behavior on scale { NumberAnimation { duration: 90 } }

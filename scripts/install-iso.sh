@@ -13,28 +13,36 @@
 # Nothing crashes, nothing is highlighted, and a post-launch health check run
 # BEFORE anyone clicks the module looks perfectly clean — module loading is lazy.
 #
-#   ./scripts/install-iso.sh <iso-dir>          # e.g. /extra/tmp/bc-iso-ab12cd34ef56
+#   ./scripts/install-iso.sh <iso-dir> [basecamp-appimage]
+#                                              # e.g. /extra/tmp/bc-iso-ab12cd34ef56
 #
 # Refuses to touch the live install. Does not launch anything — that is the
 # caller's job (see the run-isolated skill).
 #
-set -uo pipefail
+set -euo pipefail
 cd "$(dirname "$0")/.."
 
+SC=""
+SC2=""
+CORE_NEW=""
+cleanup() {
+  [ -z "$SC" ] || rm -rf "$SC"
+  [ -z "$SC2" ] || rm -rf "$SC2"
+  [ -z "$CORE_NEW" ] || rm -rf "$CORE_NEW"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 ISO=${1:-}
+BASECAMP_APPIMAGE=${2:-${BASECAMP_APPIMAGE:-}}
 if [ -z "$ISO" ]; then
   echo "usage: $0 <iso-dir>" >&2
   exit 2
 fi
 
+ISO=$(python3 scripts/validate_iso_target.py "$ISO")
 GUI="$ISO/data/Logos/LogosBasecamp"
-case "$ISO" in
-  "$HOME"/.local/share*|"$HOME"/.local/share)
-    echo "REFUSING: that is the live install, not an iso." >&2; exit 2 ;;
-esac
-if [ ! -d "$GUI/plugins" ] || [ ! -d "$GUI/modules" ]; then
-  echo "REFUSING: $GUI does not look like a Basecamp tree." >&2; exit 2
-fi
 if pgrep -f "\.LogosBasecamp\.elf" >/dev/null 2>&1; then
   for pid in $(pgrep -f "\.logos_host\.elf|\.ui-host\.elf|\.LogosBasecamp\.elf" 2>/dev/null); do
     if grep -qz "XDG_DATA_HOME=$ISO/data" /proc/"$pid"/environ 2>/dev/null; then
@@ -63,29 +71,53 @@ echo "  plugins/peers_ui  ok"
 
 # ── the core module it depends on ───────────────────────────────────────────
 #
-# peers_core is a SEPARATE artifact from a SEPARATE repo. It is the half that
-# gets forgotten, because the UI is what you were working on.
-if [ "$(ls -A "$GUI/modules/peers_core" 2>/dev/null | wc -l)" -gt 0 ]; then
-  echo "  modules/peers_core already present — leaving it"
-else
-  echo "building peers_core (github:xAlisher/peers-core)…"
-  TMPDIR=/extra/tmp nix build "github:xAlisher/peers-core#packages.x86_64-linux.lgx-portable" \
-    --accept-flake-config -o /extra/tmp/peers-core-lgx || {
-      echo "FAILED to build peers_core. The UI will install but Peers will do" >&2
-      echo "NOTHING when clicked — it cannot resolve its dependency." >&2
-      exit 1
-    }
-  CORE_LGX=$(find /extra/tmp/peers-core-lgx/ -name '*.lgx' | head -1)
-  SC2=$(mktemp -d /extra/tmp/peers-core-XXXX)
-  tar xzf "$CORE_LGX" -C "$SC2"
-  mkdir -p "$GUI/modules/peers_core"
-  chmod -R u+w "$GUI/modules/peers_core"
-  cp -rf "$SC2/variants/linux-amd64/." "$GUI/modules/peers_core/"
-  cp -f  "$SC2/manifest.json" "$GUI/modules/peers_core/manifest.json"
-  printf 'linux-amd64' > "$GUI/modules/peers_core/variant"
-  chmod -R u+w "$GUI/modules/peers_core"
-  echo "  modules/peers_core  ok"
-fi
+# peers_core is a SEPARATE artifact from a SEPARATE repo. Install the exact
+# revision pinned by peers_ui's flake.lock every time: retaining an older module
+# package silently defeats fixes such as conversation persistence while the UI
+# itself appears current. Identity/history data live under module_data, not here.
+CORE_REV=$(python3 - "plugins/peers_ui/flake.lock" <<'PY'
+import json
+import sys
+lock = json.load(open(sys.argv[1]))
+print(lock["nodes"]["peers_core"]["locked"]["rev"])
+PY
+)
+[ -n "$CORE_REV" ] || { echo "cannot resolve pinned peers_core revision" >&2; exit 1; }
+echo "building peers_core (pinned $CORE_REV)…"
+TMPDIR=/extra/tmp nix build \
+  "github:xAlisher/peers-core/${CORE_REV}#packages.x86_64-linux.lgx-portable" \
+  --accept-flake-config -o /extra/tmp/peers-core-lgx || {
+    echo "FAILED to build peers_core. The UI will install but Peers will do" >&2
+    echo "NOTHING when clicked — it cannot resolve its dependency." >&2
+    exit 1
+  }
+CORE_LGX=$(find /extra/tmp/peers-core-lgx/ -name '*.lgx' | head -1)
+[ -n "$CORE_LGX" ] && [ -f "$CORE_LGX" ] || {
+  echo "no peers_core .lgx produced" >&2
+  exit 1
+}
+SC2=$(mktemp -d /extra/tmp/peers-core-XXXX)
+tar xzf "$CORE_LGX" -C "$SC2"
+[ -d "$SC2/variants/linux-amd64" ] && [ -s "$SC2/manifest.json" ] || {
+  echo "invalid peers_core package: variant or manifest missing" >&2
+  exit 1
+}
+CORE_DEST="$GUI/modules/peers_core"
+CORE_NEW="$GUI/modules/.peers_core.new.$$"
+rm -rf "$CORE_NEW"
+mkdir -p "$CORE_NEW"
+cp -rf "$SC2/variants/linux-amd64/." "$CORE_NEW/"
+cp -f  "$SC2/manifest.json" "$CORE_NEW/manifest.json"
+printf 'linux-amd64' > "$CORE_NEW/variant"
+chmod -R u+w "$CORE_NEW"
+[ -s "$CORE_NEW/manifest.json" ] && [ -s "$CORE_NEW/variant" ] \
+  && [ -n "$(find "$CORE_NEW" -type f ! -name manifest.json ! -name variant -print -quit)" ] || {
+  echo "invalid staged peers_core tree" >&2
+  exit 1
+}
+python3 -B scripts/install_core_package.py "$CORE_NEW" "$CORE_DEST"
+CORE_NEW=""
+echo "  modules/peers_core  ok"
 
 rm -rf "$ISO/cache/Logos/LogosBasecamp/qmlcache/"* 2>/dev/null
 
@@ -106,4 +138,13 @@ print(' '.join(json.load(open('$GUI/plugins/peers_ui/manifest.json')).get('depen
 done
 
 [ "$fail" -eq 0 ] || exit 1
+if [ -n "$BASECAMP_APPIMAGE" ]; then
+  python3 scripts/artifact_identity.py \
+    --ui-lgx "$UI_LGX" \
+    --core-lgx "$CORE_LGX" \
+    --iso "$ISO" \
+    --appimage "$BASECAMP_APPIMAGE" \
+    --core-rev "$CORE_REV" \
+    --output "${PEERS_IDENTITY_REPORT:-/extra/tmp/peers-release-identity.json}"
+fi
 echo "installed into $ISO — launch it with the run-isolated recipe."

@@ -282,7 +282,8 @@ Item {
                         playing: true
                         // Bound decoded frame dimensions and avoid retaining every
                         // hostile/oversized animation in the global image cache.
-                        sourceSize.width: 640
+                        sourceSize.width: Number(root.msg.gifDecodeWidth || 0)
+                        sourceSize.height: Number(root.msg.gifDecodeHeight || 0)
                         cache: false
 
                     }
@@ -516,6 +517,15 @@ Item {
                     Accessible.role: Accessible.Button
                     Accessible.name: "Play video"
                     Accessible.ignored: !enabled
+                    Image {
+                        anchors.fill: parent
+                        source: root.msg.videoThumbnailUri !== undefined
+                                ? root.msg.videoThumbnailUri : ""
+                        visible: String(source) !== ""
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        sourceSize.width: 640
+                    }
                     Rectangle {
                         anchors.centerIn: parent
                         width: 56

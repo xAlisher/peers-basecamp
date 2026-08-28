@@ -141,13 +141,11 @@ Item {
                       show: root.isImage || root.isHosted || root.isVoice, danger: false },
                     { key: "maps",    icon: "search", label: "Open in maps",
                       show: root.isLocation, danger: false },
-                    // Android's guard here is only !isImage && !isVoice, so a
-                    // hosted GIF/video DOES get a "Copy message" that copies the
-                    // raw marker. Kept as-is deliberately — the clients are meant
-                    // to match; changing it is a decision, not a tidy-up.
+                    // Hosted raw markers contain a decryption key and fetch
+                    // capability. They remain backend-only and never reach QML.
                     { key: "copymsg", icon: "copy",
                       label: root.isLocation ? "Copy coordinates" : "Copy message",
-                      show: !root.isImage && !root.isVoice, danger: false },
+                      show: !root.isImage && !root.isVoice && !root.isHosted, danger: false },
                     { key: "sendto",  icon: "chats",  label: "Send message",
                       show: root.incoming && root.isGroup, danger: false },
                     { key: "pin",     icon: "pin",

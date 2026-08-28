@@ -76,6 +76,7 @@ class PeersUiBackend
     PROP(QString playingKey="" READONLY)
     PROP(bool    recording=false READONLY)
     PROP(int     recordingMs=0 READONLY)
+    PROP(bool    voiceRetryAvailable=false READONLY)
 
     // ── security ─────────────────────────────────────────────────────────────
     // Whether a PIN app-lock is configured, and whether the app is locked now.
@@ -150,6 +151,8 @@ class PeersUiBackend
     SLOT(void startRecording())
     SLOT(void cancelRecording())
     SLOT(void sendRecording(QString conversationId))
+    SLOT(void retryVoice())
+    SLOT(void discardVoice())
 
     // ── groups ───────────────────────────────────────────────────────────────
     SLOT(void createGroupConversation(QString name, QString description))
