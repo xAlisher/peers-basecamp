@@ -18,7 +18,6 @@ inline void sanitizeViewRow(QJsonObject* row)
     if (!row)
         return;
     row->remove(QStringLiteral("cid"));
-    row->remove(QStringLiteral("key"));
     row->remove(QStringLiteral("keyB64"));
     row->remove(QStringLiteral("cap"));
     row->remove(QStringLiteral("capability"));

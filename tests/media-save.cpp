@@ -29,6 +29,15 @@ private:
     bool m_wrote = false;
 };
 
+class FailingReadDevice final : public QIODevice {
+public:
+    FailingReadDevice() { open(QIODevice::ReadOnly); }
+
+protected:
+    qint64 readData(char*, qint64) override { return -1; }
+    qint64 writeData(const char*, qint64) override { return -1; }
+};
+
 void require(bool condition, const char* message)
 {
     if (!condition) {
@@ -83,6 +92,20 @@ int main()
     require(!MediaSave::readBounded(&shortRead, 8, 8, &bytes, &error),
             "short hosted read fails");
 
+    FailingReadDevice failingRead;
+    bytes.clear();
+    error.clear();
+    require(!MediaSave::readBounded(&failingRead, 4, 8, &bytes, &error),
+            "hosted read error fails truthfully");
+
+    QBuffer withinBoundGrowth;
+    withinBoundGrowth.setData(QByteArray("123456"));
+    require(withinBoundGrowth.open(QIODevice::ReadOnly), "within-bound growth fixture opens");
+    bytes.clear();
+    error.clear();
+    require(!MediaSave::readBounded(&withinBoundGrowth, 4, 8, &bytes, &error),
+            "hosted read that grows within its ceiling still fails exact-size validation");
+
     QBuffer growingRead;
     growingRead.setData(QByteArray("123456789"));
     require(growingRead.open(QIODevice::ReadOnly), "growing-read fixture opens");
@@ -116,7 +139,7 @@ int main()
         hostedVoice,
         QStringLiteral("reply1:key:") + hostedVoice,
         QStringLiteral("reply1:key:pfp1:clear:") + hostedVoice,
-        QStringLiteral("store2:") + QString(9000, QLatin1Char('x')),
+        QStringLiteral("store2:") + QString(1048577, QLatin1Char('x')),
         depthExhausted,
     };
     for (const QString& body : sensitiveBodies)
@@ -124,15 +147,21 @@ int main()
                 "hosted body is never restored to composer");
     require(HostedBoundary::restoreToComposer(QStringLiteral("ordinary message")),
             "ordinary text may be restored to composer");
-    QJsonObject viewRow{{QStringLiteral("cid"), QStringLiteral("cid")},
+    QJsonObject viewRow{{QStringLiteral("key"), QStringLiteral("ui-row-identity")},
+                        {QStringLiteral("cid"), QStringLiteral("cid")},
                         {QStringLiteral("keyB64"), QStringLiteral("key")},
                         {QStringLiteral("cap"), QStringLiteral("capability")},
+                        {QStringLiteral("capability"), QStringLiteral("capability")},
                         {QStringLiteral("text"), QStringLiteral("safe")}};
     HostedBoundary::sanitizeViewRow(&viewRow);
     require(!viewRow.contains(QStringLiteral("cid"))
                 && !viewRow.contains(QStringLiteral("keyB64"))
-                && !viewRow.contains(QStringLiteral("cap")),
+                && !viewRow.contains(QStringLiteral("cap"))
+                && !viewRow.contains(QStringLiteral("capability")),
             "serialized view row contains no hosted secret fields");
+    require(viewRow.value(QStringLiteral("key")).toString()
+                == QStringLiteral("ui-row-identity"),
+            "serialized view row preserves its safe UI identity key");
 
     std::cout << "ok: hosted and inline voice Save is byte-identical and truthful\n";
     return 0;
