@@ -45,6 +45,10 @@ int main()
             "malformed reply fails closed");
     require(ContentMarkers::containsHostedReference(QStringLiteral("lr1:sender:") + hosted),
             "malformed relay fails closed");
+    require(ContentMarkers::containsHostedReference(QStringLiteral("pfp1:clear:") + hosted),
+            "malformed avatar clear fails closed");
+    require(ContentMarkers::containsHostedReference(QStringLiteral("pfp1:ordinary text")),
+            "malformed avatar body fails closed");
 
     QString deeplyWrapped = hosted;
     for (int i = 0; i < 12; ++i)

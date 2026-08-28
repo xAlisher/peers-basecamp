@@ -211,7 +211,16 @@ bool containsHostedReference(const QString& raw)
             body = body.mid(QStringLiteral("pfp1:").size());
             if (body.isEmpty())
                 return true;
-            continue;
+            if (body.startsWith(QLatin1String("store1:"))
+                || body.startsWith(QLatin1String("store2:"))
+                || body.startsWith(QLatin1String("reply1:"))
+                || body.startsWith(QLatin1String("lr1:"))
+                || body.startsWith(QLatin1String("pfp1:")))
+                continue;
+            // An avatar can otherwise contain only an inline image marker.
+            // Anything else is malformed and remains backend-only.
+            return !(body.startsWith(QLatin1String("img1:"))
+                     || body.startsWith(QLatin1String("img1v:")));
         }
 
         return false;
