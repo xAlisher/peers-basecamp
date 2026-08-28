@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 
 process.env.PYTHONDONTWRITEBYTECODE = '1';
@@ -156,11 +156,28 @@ if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)
     expectRejected('unrelated package symlink', staged => {
       fs.symlinkSync(resolve(valid, 'manifest.json'), resolve(staged, 'extra-link'));
     });
+    expectRejected('unexpected core file', staged => fs.writeFileSync(resolve(staged, 'unexpected.bin'), 'x'));
+    expectRejected('unexpected core directory', staged => fs.mkdirSync(resolve(staged, 'unexpected')));
     expectRejected('fake ELF payloads', staged => {
       for (const name of ['peers_core_plugin.so', 'libssl.so.3', 'libcrypto.so.3',
         'libboost_system.so.1.87.0']) fs.writeFileSync(resolve(staged, name), '\x7fELFjunk');
     });
     expectRejected('invalid manifest', staged => fs.writeFileSync(resolve(staged, 'manifest.json'), '{'));
+    expectRejected('extra core dependency', staged => {
+      const manifest = JSON.parse(fs.readFileSync(resolve(staged, 'manifest.json')));
+      manifest.dependencies.push('attacker_module');
+      fs.writeFileSync(resolve(staged, 'manifest.json'), JSON.stringify(manifest));
+    });
+    expectRejected('duplicate core dependency', staged => {
+      const manifest = JSON.parse(fs.readFileSync(resolve(staged, 'manifest.json')));
+      manifest.dependencies.push('delivery_module');
+      fs.writeFileSync(resolve(staged, 'manifest.json'), JSON.stringify(manifest));
+    });
+    expectRejected('extra core platform entry', staged => {
+      const manifest = JSON.parse(fs.readFileSync(resolve(staged, 'manifest.json')));
+      manifest.main['evil-platform'] = 'evil.so';
+      fs.writeFileSync(resolve(staged, 'manifest.json'), JSON.stringify(manifest));
+    });
     expectRejected('oversized manifest', staged => fs.writeFileSync(resolve(staged, 'manifest.json'), 'x'.repeat(65537)));
     expectRejected('wrong variant', staged => fs.writeFileSync(resolve(staged, 'variant'), 'other'));
 
@@ -285,6 +302,12 @@ if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)
       fs.mkdirSync(resolve(releaseGui, 'modules/peers_core'), {recursive: true});
       fs.writeFileSync(resolve(releaseGui, 'plugins/peers_ui/version'), 'old-ui');
       fs.writeFileSync(resolve(releaseGui, 'modules/peers_core/version'), 'old-core');
+      fs.mkdirSync(resolve(releaseGui, 'module_data/peers_core'), {recursive: true});
+      fs.writeFileSync(resolve(releaseGui, 'module_data/peers_core/persistence'), 'must-survive');
+    }
+    function assertPersistence(label) {
+      if (fs.readFileSync(resolve(releaseGui, 'module_data/peers_core/persistence'), 'utf8') !== 'must-survive')
+        fail(`${label} lost unrelated persistence`);
     }
     resetOldRelease();
     const preRelease = spawnSync('python3', [releaseInstallerPath, uiValid, valid, releaseGui], {
@@ -301,6 +324,7 @@ if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)
     if (!fs.existsSync(resolve(releaseGui, 'plugins/peers_ui/peers_ui_plugin.so'))
         || !fs.existsSync(resolve(releaseGui, 'modules/peers_core/peers_core_plugin.so')))
       fail('coherent release did not activate both components');
+    assertPersistence('coherent release');
 
     resetOldRelease();
     const postRelease = spawnSync('python3', [releaseInstallerPath, uiValid, valid, releaseGui], {
@@ -310,6 +334,39 @@ if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)
     if (!fs.existsSync(resolve(releaseGui, 'plugins/peers_ui/peers_ui_plugin.so'))
         || !fs.existsSync(resolve(releaseGui, 'modules/peers_core/peers_core_plugin.so')))
       fail('post-exchange interruption left a mixed release');
+    assertPersistence('post-exchange interruption');
+
+    async function signalInterruption(point, signal) {
+      resetOldRelease();
+      const marker = resolve(work, `signal-${point}-${signal}`);
+      const child = spawn('python3', [releaseInstallerPath, uiValid, valid, releaseGui], {
+        stdio: 'ignore',
+        env: {...process.env, PEERS_ATOMIC_REPLACE_TEST_PAUSE: point,
+          PEERS_ATOMIC_REPLACE_TEST_MARKER: marker},
+      });
+      for (let attempt = 0; attempt < 500 && !fs.existsSync(marker); ++attempt)
+        await new Promise(resolveWait => setTimeout(resolveWait, 10));
+      if (!fs.existsSync(marker)) {
+        child.kill('SIGKILL');
+        fail(`${signal} process did not reach ${point}`);
+        return;
+      }
+      child.kill(signal);
+      await new Promise(resolveExit => child.once('exit', resolveExit));
+      const expectNew = point === 'after-exchange';
+      const hasNewUi = fs.existsSync(resolve(releaseGui, 'plugins/peers_ui/peers_ui_plugin.so'));
+      const hasNewCore = fs.existsSync(resolve(releaseGui, 'modules/peers_core/peers_core_plugin.so'));
+      if (hasNewUi !== expectNew || hasNewCore !== expectNew)
+        fail(`${signal} at ${point} produced a mixed or incorrect release`);
+      if (!expectNew && (fs.readFileSync(resolve(releaseGui, 'plugins/peers_ui/version'), 'utf8') !== 'old-ui'
+          || fs.readFileSync(resolve(releaseGui, 'modules/peers_core/version'), 'utf8') !== 'old-core'))
+        fail(`${signal} at ${point} did not preserve both old components`);
+      assertPersistence(`${signal} at ${point}`);
+    }
+    for (const signal of ['SIGINT', 'SIGTERM', 'SIGKILL']) {
+      await signalInterruption('before-exchange', signal);
+      await signalInterruption('after-exchange', signal);
+    }
   } finally {
     fs.rmSync(work, {recursive: true, force: true});
   }
