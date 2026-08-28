@@ -22,6 +22,23 @@ c++ -std=c++17 -Wall -Wextra -Werror tests/gif-safety.cpp -o "$gif_test" \
   && "$gif_test"; rc=$?
 rm -f "$gif_test"
 [ $rc -ne 0 ] && fail=1
+echo "== hosted marker confinement =="
+marker_test=$(mktemp "${TMPDIR:-/extra/tmp}/peers-content-markers-XXXXXX")
+c++ -std=c++17 -Wall -Wextra -Werror \
+  -Iplugins/peers_ui/src \
+  tests/content-markers-security.cpp plugins/peers_ui/src/ContentMarkers.cpp \
+  $(pkg-config --cflags --libs Qt6Core) -o "$marker_test" \
+  && "$marker_test"; rc=$?
+rm -f "$marker_test"
+[ $rc -ne 0 ] && fail=1
+echo "== hosted audio byte bounds =="
+bounds_test=$(mktemp "${TMPDIR:-/extra/tmp}/peers-storage-bounds-XXXXXX")
+c++ -std=c++17 -Wall -Wextra -Werror \
+  -Iplugins/peers_ui/src tests/storage-bounds.cpp \
+  $(pkg-config --cflags --libs Qt6Core) -o "$bounds_test" \
+  && "$bounds_test"; rc=$?
+rm -f "$bounds_test"
+[ $rc -ne 0 ] && fail=1
 echo "== isolated installer dependency pin =="
 node tests/install-iso.mjs; rc=$?
 [ $rc -ne 0 ] && fail=1

@@ -161,6 +161,12 @@ if (!/const bool hosted\s*=\s*o\.contains\(QStringLiteral\("cid"\)\)/.test(saveM
     || !/bytes = f\.readAll\(\)/.test(saveMediaSource)
     || !/else if \(kind == QLatin1String\("photo"\) \|\| kind == QLatin1String\("voice"\)\)/.test(saveMediaSource))
   fail('hosted voice Save does not preserve decrypted cache bytes separately from inline voice');
+if (!/#include "StorageBounds\.h"/.test(storageClient)
+    || !/const qint64 maxCiphertextBytes\s*=\s*StorageBounds::maxCiphertextBytesForMime\(mime\)/.test(storageClient)
+    || !/StorageBounds::validCacheFileSize\(cached\.size\(\), mime\)/.test(storageClient)
+    || /declared > kMaxCiphertextBytes/.test(storageClient)
+    || /received->size\(\) > kMaxCiphertextBytes/.test(storageClient))
+  fail('hosted audio does not enforce the MIME-specific bound on cache and network bytes');
 const sendRecordingSource = backend.match(/void PeersUiBackend::sendRecording\([\s\S]*?\n}\n/)?.[0] ?? '';
 const uploadVoiceSource = backend.match(/void PeersUiBackend::uploadPendingVoice\([\s\S]*?\n}\n/)?.[0] ?? '';
 if (!/m_pendingVoiceBytes = bytes/.test(sendRecordingSource)
@@ -283,8 +289,8 @@ if (!/!ContentMarkers::containsHostedReference\(content\)/.test(backend))
 if (!/bool containsHostedReference\(const QString& raw\)/.test(contentMarkers)
     || !/containsHostedReference\(body\)[\s\S]{0,120}?\[hosted media\]/.test(contentMarkers))
   fail('reply-wrapped hosted secrets are not redacted before QML');
-if (!/body\.size\(\) > kMaxBody[\s\S]{0,100}?reply1:/.test(contentMarkers))
-  fail('oversized reply wrappers can bypass hosted-secret redaction');
+if (!/body\.size\(\) > kMaxBody[\s\S]{0,100}?return isReply \|\| isRelay \|\| isAvatar/.test(contentMarkers))
+  fail('oversized hosted wrappers can bypass hosted-secret redaction');
 if (!/encodeHostedMedia\([\s\S]{0,300}?false\);/.test(backend))
   fail('a hosted send failure can still restore its secret marker into the composer');
 if (!/show: !root\.isImage && !root\.isVoice && !root\.isHosted/.test(bubbleMenu))

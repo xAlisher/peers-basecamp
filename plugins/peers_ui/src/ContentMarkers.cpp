@@ -176,20 +176,45 @@ Kind classify(const QString& raw)
 bool containsHostedReference(const QString& raw)
 {
     QString body = raw;
-    for (int depth = 0; depth < 4; ++depth) {
+    for (int depth = 0; depth < 8; ++depth) {
         if (body.startsWith(QLatin1String("store1:"))
             || body.startsWith(QLatin1String("store2:")))
             return true;
+
+        const bool isReply = body.startsWith(QLatin1String("reply1:"));
+        const bool isRelay = body.startsWith(QLatin1String("lr1:"));
+        const bool isAvatar = body.startsWith(QLatin1String("pfp1:"));
         if (body.size() > kMaxBody)
-            return body.startsWith(QLatin1String("reply1:"));
-        const Kind kind = classify(body);
-        if (kind != Kind::Reply)
-            return false;
-        const QString payload = body.mid(QStringLiteral("reply1:").size());
-        const int sep = payload.indexOf(QLatin1Char(':'));
-        if (sep < 0)
-            return false;
-        body = payload.mid(sep + 1);
+            return isReply || isRelay || isAvatar;
+
+        if (isReply) {
+            const QString payload = body.mid(QStringLiteral("reply1:").size());
+            const int sep = payload.indexOf(QLatin1Char(':'));
+            if (sep <= 0 || sep + 1 >= payload.size())
+                return true;
+            body = payload.mid(sep + 1);
+            continue;
+        }
+
+        if (isRelay) {
+            const QString payload = body.mid(QStringLiteral("lr1:").size());
+            const int sep = usIndex(payload);
+            if (sep <= 0 || sep + 1 >= payload.size())
+                return true;
+            body = payload.mid(sep + 1);
+            continue;
+        }
+
+        if (isAvatar) {
+            if (body == QLatin1String("pfp1:clear"))
+                return false;
+            body = body.mid(QStringLiteral("pfp1:").size());
+            if (body.isEmpty())
+                return true;
+            continue;
+        }
+
+        return false;
     }
     // More nesting than we intentionally parse is hostile/ambiguous. Keep it
     // backend-only rather than risking a deeply wrapped capability leak.
