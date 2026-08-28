@@ -110,8 +110,6 @@ fi
 keys=$(find "$IDENTITY" -name identity.key 2>/dev/null | wc -l)
 echo "identity: $IDENTITY ($keys key file(s) — 0 is fine on a first run)"
 
-rm -rf "$ISO/cache/Logos/LogosBasecamp/qmlcache/"* 2>/dev/null
-
 # ── launch ──────────────────────────────────────────────────────────────────
 #
 # XDG_RUNTIME_DIR is REQUIRED for audio: without it the instance cannot reach the

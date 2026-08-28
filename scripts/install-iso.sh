@@ -111,8 +111,7 @@ chmod -R u+w "$CORE_STAGE"
   echo "invalid staged peers_core tree" >&2
   exit 1
 }
-python3 -B scripts/clear_qml_cache.py "$ISO"
-python3 -B scripts/install_release_bundle.py "$UI_STAGE" "$CORE_STAGE" "$GUI"
+python3 -B scripts/install_release_bundle.py "$UI_STAGE" "$CORE_STAGE" "$ISO"
 echo "  plugins/peers_ui  ok"
 echo "  modules/peers_core  ok"
 

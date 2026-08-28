@@ -113,8 +113,9 @@ lgpm --modules-dir ~/.local/share/Logos/LogosBasecamp/modules \
      --allow-unsigned install --file result/*.lgx
 ```
 
-`rm -rf` the target subdir first, and clear `~/.cache/Logos/LogosBasecamp/qmlcache/` after — a stale
-QML cache serves the old view and makes a good build look broken.
+For isolated deployments, use `scripts/install-iso.sh`; do not manually delete package or QML-cache
+paths. The installer validates both packages, builds a complete isolated-root candidate with a fresh
+cache, and publishes packages plus cache through one same-parent atomic exchange.
 
 For testing against a live Basecamp without disturbing it, use the `run-isolated` skill (per-session
 `LOGOS_INSTANCE_ID` + absolute `XDG_*_HOME`). **Safety gate: never kill a process whose
