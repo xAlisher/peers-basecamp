@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
-import { spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { spawn, spawnSync } from 'node:child_process';
+import { dirname, resolve } from 'node:path';
 
 process.env.PYTHONDONTWRITEBYTECODE = '1';
 
@@ -10,8 +10,13 @@ const installerPath = resolve(root, 'scripts/install-iso.sh');
 const replacerPath = resolve(root, 'scripts/atomic_replace.py');
 const validatorPath = resolve(root, 'scripts/validate_core_package.py');
 const coreInstallerPath = resolve(root, 'scripts/install_core_package.py');
+const uiValidatorPath = resolve(root, 'scripts/validate_ui_package.py');
+const uiInstallerPath = resolve(root, 'scripts/install_ui_package.py');
+const releaseInstallerPath = resolve(root, 'scripts/install_release_bundle.py');
 const targetValidatorPath = resolve(root, 'scripts/validate_iso_target.py');
+const isoLauncherPath = resolve(root, 'scripts/iso.sh');
 const source = fs.readFileSync(installerPath, 'utf8');
+const isoSource = fs.readFileSync(isoLauncherPath, 'utf8');
 let failed = false;
 
 function fail(message) {
@@ -25,10 +30,15 @@ function requirePattern(pattern, message) {
 requirePattern(/set -euo pipefail/, 'installer is not fail-fast');
 requirePattern(/flake\.lock[\s\S]*?peers_core[\s\S]*?rev/, 'installer does not resolve the pinned peers_core revision');
 requirePattern(/github:xAlisher\/peers-core\/\$\{?CORE_REV\}?/, 'installer does not build the pinned peers_core revision');
-requirePattern(/install_core_package\.py"?\s+"\$CORE_NEW"\s+"\$CORE_DEST"/, 'installer does not validate then atomically replace peers_core');
+requirePattern(/install_release_bundle\.py"?\s+"\$UI_STAGE"\s+"\$CORE_STAGE"\s+"\$ISO"/, 'installer does not activate UI and core as one atomic release');
+requirePattern(/safe_extract_lgx\.py"?\s+"\$UI_LGX"\s+"\$SC"/, 'installer does not safely extract peers_ui');
+requirePattern(/safe_extract_lgx\.py"?\s+"\$CORE_LGX"\s+"\$SC2"/, 'installer does not safely extract peers_core');
+if (/tar\s+x/.test(source)) fail('installer still performs permissive archive extraction');
+if ([source, isoSource].some(shell => /rm\s+-rf[^\n]*qmlcache/.test(shell)))
+  fail('production shell still clears QML cache through a symlink-following glob');
 requirePattern(/ISO=\$\(python3 scripts\/validate_iso_target\.py "\$ISO"\)[\s\S]{0,120}?GUI="\$ISO\/data\/Logos\/LogosBasecamp"/, 'installer does not canonicalize and validate the isolated target');
 requirePattern(/artifact_identity\.py[\s\S]{0,500}?--ui-lgx[\s\S]{0,500}?--core-lgx[\s\S]{0,500}?--appimage/, 'final install cannot generate an artifact identity report');
-requirePattern(/\[ -s "\$CORE_NEW\/manifest\.json" \]/, 'installer does not validate its staged manifest');
+requirePattern(/\[ -s "\$CORE_STAGE\/manifest\.json" \]/, 'installer does not validate its staged manifest');
 if (/mv\s+"\$CORE_DEST"\s+"\$CORE_OLD"/.test(source))
   fail('installer still creates a window where peers_core is absent');
 if (/already present[^\n]*leaving it/.test(source))
@@ -82,8 +92,10 @@ if (!fs.existsSync(replacerPath)) {
   }
 }
 
-if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)) {
-  fail('core package validator or validate-then-replace helper is missing');
+if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)
+    || !fs.existsSync(uiValidatorPath) || !fs.existsSync(uiInstallerPath)
+    || !fs.existsSync(releaseInstallerPath)) {
+  fail('package validator or validate-then-replace helper is missing');
 } else {
   const work = fs.mkdtempSync('/extra/tmp/peers-package-test-');
   try {
@@ -145,11 +157,28 @@ if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)) {
     expectRejected('unrelated package symlink', staged => {
       fs.symlinkSync(resolve(valid, 'manifest.json'), resolve(staged, 'extra-link'));
     });
+    expectRejected('unexpected core file', staged => fs.writeFileSync(resolve(staged, 'unexpected.bin'), 'x'));
+    expectRejected('unexpected core directory', staged => fs.mkdirSync(resolve(staged, 'unexpected')));
     expectRejected('fake ELF payloads', staged => {
       for (const name of ['peers_core_plugin.so', 'libssl.so.3', 'libcrypto.so.3',
         'libboost_system.so.1.87.0']) fs.writeFileSync(resolve(staged, name), '\x7fELFjunk');
     });
     expectRejected('invalid manifest', staged => fs.writeFileSync(resolve(staged, 'manifest.json'), '{'));
+    expectRejected('extra core dependency', staged => {
+      const manifest = JSON.parse(fs.readFileSync(resolve(staged, 'manifest.json')));
+      manifest.dependencies.push('attacker_module');
+      fs.writeFileSync(resolve(staged, 'manifest.json'), JSON.stringify(manifest));
+    });
+    expectRejected('duplicate core dependency', staged => {
+      const manifest = JSON.parse(fs.readFileSync(resolve(staged, 'manifest.json')));
+      manifest.dependencies.push('delivery_module');
+      fs.writeFileSync(resolve(staged, 'manifest.json'), JSON.stringify(manifest));
+    });
+    expectRejected('extra core platform entry', staged => {
+      const manifest = JSON.parse(fs.readFileSync(resolve(staged, 'manifest.json')));
+      manifest.main['evil-platform'] = 'evil.so';
+      fs.writeFileSync(resolve(staged, 'manifest.json'), JSON.stringify(manifest));
+    });
     expectRejected('oversized manifest', staged => fs.writeFileSync(resolve(staged, 'manifest.json'), 'x'.repeat(65537)));
     expectRejected('wrong variant', staged => fs.writeFileSync(resolve(staged, 'variant'), 'other'));
 
@@ -159,6 +188,288 @@ if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)) {
     if (installed.status !== 0) fail(`valid package install failed: ${installed.stderr.trim()}`);
     if (!fs.existsSync(resolve(dest, 'peers_core_plugin.so')) || fs.existsSync(resolve(dest, 'version')))
       fail('valid package did not atomically replace the working core');
+
+    const uiValid = resolve(work, 'valid-ui');
+    fs.cpSync(valid, uiValid, {recursive: true});
+    fs.renameSync(resolve(uiValid, 'peers_core_plugin.so'), resolve(uiValid, 'peers_ui_plugin.so'));
+    const replica = spawnSync('cc', ['-shared', '-fPIC', '-x', 'c', '-', '-o',
+      resolve(uiValid, 'peers_ui_replica_factory.so')], {input: 'int replica(void) { return 1; }', encoding: 'utf8'});
+    if (replica.status !== 0) fail(`could not compile replica factory: ${replica.stderr.trim()}`);
+    fs.mkdirSync(resolve(uiValid, 'qml'));
+    const uiAssets = [
+      'Peers_sidebar.png', 'metadata.json', 'qml/AddressCard.qml',
+      'qml/BubbleActionMenu.qml', 'qml/ClipboardProxy.qml', 'qml/Composer.qml',
+      'qml/ContactsPanel.qml', 'qml/ConversationRow.qml', 'qml/EmojiGrid.qml',
+      'qml/EmptyState.qml', 'qml/ForwardPicker.qml', 'qml/GroupInfoPanel.qml',
+      'qml/HexAvatar.qml', 'qml/Identicon.js', 'qml/MediaViewer.qml',
+      'qml/MessageBubble.qml', 'qml/MessageLayout.js', 'qml/PeersIcon.qml',
+      'qml/PeersView.qml', 'qml/PinnedBar.qml', 'qml/SettingsPanel.qml',
+      'qml/Theme.js', 'qml/Toast.qml', 'qml/icons/Peers_sidebar.png', 'qml/qmldir',
+    ];
+    for (const relative of uiAssets) {
+      const path = resolve(uiValid, relative);
+      fs.mkdirSync(dirname(path), {recursive: true});
+      fs.writeFileSync(path, relative.endsWith('.json') ? '{}' : 'runtime asset');
+    }
+    fs.writeFileSync(resolve(uiValid, 'manifest.json'), JSON.stringify({
+      name: 'peers_ui', type: 'ui_qml', dependencies: ['peers_core', 'delivery_module'],
+      main: {'linux-amd64': 'peers_ui_plugin.so'}, view: 'qml/PeersView.qml',
+      icon: 'Peers_sidebar.png',
+    }));
+    const uiDest = resolve(work, 'peers_ui');
+    fs.mkdirSync(uiDest);
+    fs.writeFileSync(resolve(uiDest, 'version'), 'working');
+    function expectUiRejected(label, mutate) {
+      const staged = resolve(work, `.peers_ui.reject-${caseNumber++}`);
+      fs.cpSync(uiValid, staged, {recursive: true});
+      mutate(staged);
+      const result = spawnSync('python3', [uiInstallerPath, staged, uiDest], {encoding: 'utf8'});
+      if (result.status === 0) fail(`${label} reached UI atomic replacement`);
+      if (fs.readFileSync(resolve(uiDest, 'version'), 'utf8') !== 'working')
+        fail(`${label} damaged the working UI`);
+      fs.rmSync(staged, {recursive: true, force: true});
+    }
+    expectUiRejected('missing UI plugin', staged => fs.rmSync(resolve(staged, 'peers_ui_plugin.so')));
+    for (const name of ['peers_ui_replica_factory.so', 'libssl.so.3', 'libcrypto.so.3',
+      'libboost_system.so.1.87.0', ...uiAssets]) {
+      expectUiRejected(`missing UI runtime ${name}`, staged => fs.rmSync(resolve(staged, name)));
+    }
+    expectUiRejected('symlinked UI view', staged => {
+      fs.rmSync(resolve(staged, 'qml/PeersView.qml'));
+      fs.symlinkSync(resolve(uiValid, 'qml/PeersView.qml'), resolve(staged, 'qml/PeersView.qml'));
+    });
+    expectUiRejected('symlinked UI replica', staged => {
+      fs.rmSync(resolve(staged, 'peers_ui_replica_factory.so'));
+      fs.symlinkSync(resolve(uiValid, 'peers_ui_replica_factory.so'),
+        resolve(staged, 'peers_ui_replica_factory.so'));
+    });
+    expectUiRejected('FIFO package node', staged => {
+      const fifo = resolve(staged, 'unexpected-fifo');
+      const made = spawnSync('mkfifo', [fifo], {encoding: 'utf8'});
+      if (made.status !== 0) fail(`could not create FIFO fixture: ${made.stderr.trim()}`);
+    });
+    expectUiRejected('unexpected regular file', staged => fs.writeFileSync(resolve(staged, 'extra'), 'x'));
+    expectUiRejected('unexpected empty directory', staged => fs.mkdirSync(resolve(staged, 'empty')));
+    expectUiRejected('wrong UI manifest', staged => fs.writeFileSync(resolve(staged, 'manifest.json'), '{}'));
+    expectUiRejected('extra UI dependency', staged => {
+      const manifest = JSON.parse(fs.readFileSync(resolve(staged, 'manifest.json')));
+      manifest.dependencies.push('attacker_module');
+      fs.writeFileSync(resolve(staged, 'manifest.json'), JSON.stringify(manifest));
+    });
+    expectUiRejected('extra UI platform entry', staged => {
+      const manifest = JSON.parse(fs.readFileSync(resolve(staged, 'manifest.json')));
+      manifest.main['evil-platform'] = 'evil.so';
+      fs.writeFileSync(resolve(staged, 'manifest.json'), JSON.stringify(manifest));
+    });
+    expectUiRejected('oversized UI manifest', staged =>
+      fs.writeFileSync(resolve(staged, 'manifest.json'), 'x'.repeat(65537)));
+    expectUiRejected('wrong UI variant', staged => fs.writeFileSync(resolve(staged, 'variant'), 'other'));
+    function corruptElf(staged, name, offset, value) {
+      const path = resolve(staged, name);
+      const bytes = fs.readFileSync(path);
+      bytes[offset] = value;
+      fs.writeFileSync(path, bytes);
+    }
+    expectUiRejected('wrong ELF class', staged => corruptElf(staged, 'peers_ui_plugin.so', 4, 1));
+    expectUiRejected('wrong ELF type', staged => corruptElf(staged, 'peers_ui_plugin.so', 16, 2));
+    expectUiRejected('wrong ELF architecture', staged => corruptElf(staged, 'peers_ui_plugin.so', 18, 40));
+    expectUiRejected('invalid replica ELF', staged =>
+      fs.writeFileSync(resolve(staged, 'peers_ui_replica_factory.so'), '\x7fELFjunk'));
+    for (const name of ['peers_ui_plugin.so', 'peers_ui_replica_factory.so', 'libssl.so.3',
+      'libcrypto.so.3', 'libboost_system.so.1.87.0']) {
+      expectUiRejected(`symlinked native runtime ${name}`, staged => {
+        fs.rmSync(resolve(staged, name));
+        fs.symlinkSync(resolve(uiValid, name), resolve(staged, name));
+      });
+      expectUiRejected(`invalid native runtime ${name}`, staged =>
+        fs.writeFileSync(resolve(staged, name), '\x7fELFjunk'));
+    }
+    expectUiRejected('excess package entries', staged => {
+      const extras = resolve(staged, 'excess');
+      fs.mkdirSync(extras);
+      for (let i = 0; i < 4097; ++i) fs.writeFileSync(resolve(extras, `${i}`), 'x');
+    });
+    const uiInstallable = resolve(work, '.peers_ui.valid');
+    fs.cpSync(uiValid, uiInstallable, {recursive: true});
+    const uiInstalled = spawnSync('python3', [uiInstallerPath, uiInstallable, uiDest], {encoding: 'utf8'});
+    if (uiInstalled.status !== 0) fail(`valid UI package install failed: ${uiInstalled.stderr.trim()}`);
+    if (!fs.existsSync(resolve(uiDest, 'peers_ui_plugin.so')) || fs.existsSync(resolve(uiDest, 'version')))
+      fail('valid UI package did not atomically replace the working UI');
+
+    const releaseIso = resolve(work, 'release-iso');
+    const releaseGui = resolve(releaseIso, 'data/Logos/LogosBasecamp');
+    const releaseCache = resolve(releaseIso, 'cache/Logos/LogosBasecamp/qmlcache');
+    function resetOldRelease() {
+      fs.rmSync(releaseIso, {recursive: true, force: true});
+      fs.mkdirSync(resolve(releaseGui, 'plugins/peers_ui'), {recursive: true});
+      fs.mkdirSync(resolve(releaseGui, 'modules/peers_core'), {recursive: true});
+      fs.writeFileSync(resolve(releaseGui, 'plugins/peers_ui/version'), 'old-ui');
+      fs.writeFileSync(resolve(releaseGui, 'modules/peers_core/version'), 'old-core');
+      fs.mkdirSync(resolve(releaseGui, 'module_data/peers_core'), {recursive: true});
+      fs.writeFileSync(resolve(releaseGui, 'module_data/peers_core/persistence'), 'must-survive');
+      fs.mkdirSync(releaseCache, {recursive: true});
+      fs.writeFileSync(resolve(releaseCache, 'stale'), 'compiled QML');
+    }
+    function assertPersistence(label) {
+      if (fs.readFileSync(resolve(releaseGui, 'module_data/peers_core/persistence'), 'utf8') !== 'must-survive')
+        fail(`${label} lost unrelated persistence`);
+    }
+    resetOldRelease();
+    const preRelease = spawnSync('python3', [releaseInstallerPath, uiValid, valid, releaseIso], {
+      encoding: 'utf8', env: {...process.env, PEERS_ATOMIC_REPLACE_TEST_FAIL: 'before-exchange'},
+    });
+    if (preRelease.status === 0) fail('pre-exchange release failure unexpectedly succeeded');
+    if (fs.readFileSync(resolve(releaseGui, 'plugins/peers_ui/version'), 'utf8') !== 'old-ui'
+        || fs.readFileSync(resolve(releaseGui, 'modules/peers_core/version'), 'utf8') !== 'old-core')
+      fail('pre-exchange failure produced a mixed release');
+    if (!fs.existsSync(resolve(releaseCache, 'stale')))
+      fail('pre-exchange failure cleared the old cache');
+
+    const invalidCore = resolve(work, 'invalid-core-release');
+    fs.cpSync(valid, invalidCore, {recursive: true});
+    fs.rmSync(resolve(invalidCore, 'peers_core_plugin.so'));
+    const invalidRelease = spawnSync('python3', [releaseInstallerPath, uiValid, invalidCore, releaseIso],
+      {encoding: 'utf8'});
+    if (invalidRelease.status === 0 || !fs.existsSync(resolve(releaseCache, 'stale')))
+      fail('final package validation failure changed the active cache');
+
+    const externalCache = resolve(work, 'external-release-cache');
+    fs.mkdirSync(externalCache);
+    fs.writeFileSync(resolve(externalCache, 'must-survive'), 'unrelated');
+    fs.rmSync(releaseCache, {recursive: true});
+    fs.symlinkSync(externalCache, releaseCache);
+
+    const installedRelease = spawnSync('python3', [releaseInstallerPath, uiValid, valid, releaseIso],
+      {encoding: 'utf8'});
+    if (installedRelease.status !== 0) fail(`coherent release install failed: ${installedRelease.stderr.trim()}`);
+    if (!fs.existsSync(resolve(releaseGui, 'plugins/peers_ui/peers_ui_plugin.so'))
+        || !fs.existsSync(resolve(releaseGui, 'modules/peers_core/peers_core_plugin.so')))
+      fail('coherent release did not activate both components');
+    if (!fs.existsSync(resolve(externalCache, 'must-survive'))
+        || fs.lstatSync(releaseCache).isSymbolicLink() || fs.readdirSync(releaseCache).length !== 0)
+      fail('coherent release followed a cache symlink or did not publish a fresh cache');
+    assertPersistence('coherent release');
+
+    for (const [index, relative] of [
+      'cache', 'cache/Logos', 'cache/Logos/LogosBasecamp',
+      'cache/Logos/LogosBasecamp/qmlcache',
+    ].entries()) {
+      resetOldRelease();
+      const component = resolve(releaseIso, relative);
+      const external = resolve(work, `external-cache-component-${index}`);
+      fs.mkdirSync(external);
+      fs.writeFileSync(resolve(external, 'must-survive'), 'unrelated');
+      fs.rmSync(component, {recursive: true, force: true});
+      fs.symlinkSync(external, component);
+      const linkedRelease = spawnSync('python3',
+        [releaseInstallerPath, uiValid, valid, releaseIso], {encoding: 'utf8'});
+      if (linkedRelease.status !== 0 || !fs.existsSync(resolve(external, 'must-survive'))
+          || fs.lstatSync(releaseCache).isSymbolicLink())
+        fail(`cache ancestor symlink was followed or not replaced: ${relative}`);
+
+      resetOldRelease();
+      fs.rmSync(component, {recursive: true, force: true});
+      fs.writeFileSync(component, 'not a directory');
+      const fileRelease = spawnSync('python3',
+        [releaseInstallerPath, uiValid, valid, releaseIso], {encoding: 'utf8'});
+      if (fileRelease.status !== 0 || !fs.lstatSync(releaseCache).isDirectory())
+        fail(`cache ancestor non-directory was not safely replaced: ${relative}`);
+    }
+
+    for (const packageParent of ['plugins', 'modules']) {
+      resetOldRelease();
+      const external = resolve(work, `external-${packageParent}`);
+      fs.mkdirSync(external);
+      fs.writeFileSync(resolve(external, 'must-survive'), 'unrelated');
+      fs.rmSync(resolve(releaseGui, packageParent), {recursive: true});
+      fs.symlinkSync(external, resolve(releaseGui, packageParent));
+      const linkedParent = spawnSync('python3',
+        [releaseInstallerPath, uiValid, valid, releaseIso], {encoding: 'utf8'});
+      if (linkedParent.status === 0 || !fs.existsSync(resolve(external, 'must-survive'))
+          || fs.readdirSync(external).length !== 1)
+        fail(`symlinked ${packageParent} parent escaped the isolated release root`);
+    }
+
+    resetOldRelease();
+    const raceExternal = resolve(work, 'external-post-clone-plugins');
+    fs.mkdirSync(raceExternal);
+    fs.writeFileSync(resolve(raceExternal, 'must-survive'), 'unrelated');
+    const raceProbe = `
+import pathlib, shutil, sys
+sys.path.insert(0, ${JSON.stringify(resolve(root, 'scripts'))})
+import install_release_bundle as release
+ui, core, iso, external = map(pathlib.Path, sys.argv[1:])
+original = release.shutil.copytree
+def copytree(source, destination, *args, **kwargs):
+    result = original(source, destination, *args, **kwargs)
+    if pathlib.Path(source) == iso:
+        parent = pathlib.Path(destination) / 'data/Logos/LogosBasecamp/plugins'
+        shutil.rmtree(parent)
+        parent.symlink_to(external, target_is_directory=True)
+    return result
+release.shutil.copytree = copytree
+try:
+    release.install(ui, core, iso)
+except ValueError:
+    pass
+else:
+    raise SystemExit('post-clone package-parent retarget was accepted')
+if not (external / 'must-survive').is_file() or len(list(external.iterdir())) != 1:
+    raise SystemExit('post-clone package-parent retarget touched external data')
+`;
+    const racedParent = spawnSync('python3', ['-c', raceProbe, uiValid, valid, releaseIso, raceExternal],
+      {encoding: 'utf8'});
+    if (racedParent.status !== 0)
+      fail(`candidate package-parent validation is ineffective: ${racedParent.stderr.trim()}`);
+
+    resetOldRelease();
+    const postRelease = spawnSync('python3', [releaseInstallerPath, uiValid, valid, releaseIso], {
+      encoding: 'utf8', env: {...process.env, PEERS_ATOMIC_REPLACE_TEST_FAIL: 'after-exchange'},
+    });
+    if (postRelease.status === 0) fail('post-exchange interruption unexpectedly succeeded');
+    if (!fs.existsSync(resolve(releaseGui, 'plugins/peers_ui/peers_ui_plugin.so'))
+        || !fs.existsSync(resolve(releaseGui, 'modules/peers_core/peers_core_plugin.so')))
+      fail('post-exchange interruption left a mixed release');
+    assertPersistence('post-exchange interruption');
+
+    async function signalInterruption(point, signal) {
+      resetOldRelease();
+      const marker = `PEERS_ATOMIC_REPLACE_TEST_PAUSE:${point}`;
+      let output = '';
+      const child = spawn('python3', [releaseInstallerPath, uiValid, valid, releaseIso], {
+        stdio: ['ignore', 'pipe', 'ignore'],
+        env: {...process.env, PEERS_ATOMIC_REPLACE_TEST_PAUSE: point},
+      });
+      child.stdout.setEncoding('utf8');
+      child.stdout.on('data', chunk => { output += chunk; });
+      for (let attempt = 0; attempt < 500 && !output.includes(marker); ++attempt)
+        await new Promise(resolveWait => setTimeout(resolveWait, 10));
+      if (!output.includes(marker)) {
+        child.kill('SIGKILL');
+        fail(`${signal} process did not reach ${point}`);
+        return;
+      }
+      child.kill(signal);
+      await new Promise(resolveExit => child.once('exit', resolveExit));
+      const expectNew = point === 'after-exchange';
+      const hasNewUi = fs.existsSync(resolve(releaseGui, 'plugins/peers_ui/peers_ui_plugin.so'));
+      const hasNewCore = fs.existsSync(resolve(releaseGui, 'modules/peers_core/peers_core_plugin.so'));
+      if (hasNewUi !== expectNew || hasNewCore !== expectNew)
+        fail(`${signal} at ${point} produced a mixed or incorrect release`);
+      if (!expectNew && (fs.readFileSync(resolve(releaseGui, 'plugins/peers_ui/version'), 'utf8') !== 'old-ui'
+          || fs.readFileSync(resolve(releaseGui, 'modules/peers_core/version'), 'utf8') !== 'old-core'))
+        fail(`${signal} at ${point} did not preserve both old components`);
+      if (expectNew && (!fs.lstatSync(releaseCache).isDirectory()
+          || fs.readdirSync(releaseCache).length !== 0))
+        fail(`${signal} at ${point} did not publish the fresh cache with both packages`);
+      if (!expectNew && !fs.existsSync(resolve(releaseCache, 'stale')))
+        fail(`${signal} at ${point} did not preserve the old cache with both packages`);
+      assertPersistence(`${signal} at ${point}`);
+    }
+    for (const signal of ['SIGINT', 'SIGTERM', 'SIGKILL']) {
+      await signalInterruption('before-exchange', signal);
+      await signalInterruption('after-exchange', signal);
+    }
   } finally {
     fs.rmSync(work, {recursive: true, force: true});
   }
@@ -220,4 +531,4 @@ if (!fs.existsSync(targetValidatorPath)) {
 }
 
 if (failed) process.exit(1);
-console.log('ok: isolated installer atomically updates the pinned peers_core package');
+console.log('ok: isolated installer atomically activates one validated UI/core release');

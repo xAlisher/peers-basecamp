@@ -52,6 +52,9 @@ rm -f "$save_test"
 echo "== isolated installer dependency pin =="
 node tests/install-iso.mjs; rc=$?
 [ $rc -ne 0 ] && fail=1
+echo "== hostile LGX extraction =="
+python3 -B tests/safe-extract-lgx.py; rc=$?
+[ $rc -ne 0 ] && fail=1
 echo "== final artifact identity =="
 node tests/artifact-identity.mjs; rc=$?
 [ $rc -ne 0 ] && fail=1

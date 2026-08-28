@@ -9,9 +9,18 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import time
 
 AT_FDCWD = -100
 RENAME_EXCHANGE = 2
+
+
+def test_pause(point: str) -> None:
+    if os.environ.get("PEERS_ATOMIC_REPLACE_TEST_PAUSE") != point:
+        return
+    print(f"PEERS_ATOMIC_REPLACE_TEST_PAUSE:{point}", flush=True)
+    while True:
+        time.sleep(1)
 
 
 def atomic_replace(staged: Path, destination: Path) -> None:
@@ -24,6 +33,7 @@ def atomic_replace(staged: Path, destination: Path) -> None:
 
     if os.environ.get("PEERS_ATOMIC_REPLACE_TEST_FAIL") == "before-exchange":
         raise RuntimeError("injected pre-exchange failure")
+    test_pause("before-exchange")
 
     if not destination.exists():
         os.replace(staged, destination)
@@ -44,6 +54,7 @@ def atomic_replace(staged: Path, destination: Path) -> None:
             raise OSError(error, "atomic directory exchange is unavailable")
         raise OSError(error, os.strerror(error))
 
+    test_pause("after-exchange")
     if os.environ.get("PEERS_ATOMIC_REPLACE_TEST_FAIL") == "after-exchange":
         raise RuntimeError("injected post-exchange interruption")
 
