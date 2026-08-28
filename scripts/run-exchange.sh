@@ -63,11 +63,10 @@ done
 rm -rf "$WORK"; mkdir -p "$WORK/alice" "$WORK/bob"
 trap reap EXIT
 
-# Hosted media needs a storage bearer token. It is NEVER committed — supply it
-# in the environment (the Android build takes it as a gradle property for the
-# same reason). Without it, hosted media is disabled and the module says so.
+# Hosted uploads use anonymous one-use grants. Keep the legacy bearer explicitly
+# absent so this harness cannot accidentally prove a credential-dependent path.
+# Capability-bearing downloads remain tokenless; capless legacy downloads fail.
 export PEERS_STORAGE_BASE="${PEERS_STORAGE_BASE:-https://msg.logos.live/s/api/storage/v1}"
-export PEERS_STORAGE_TOKEN="${PEERS_STORAGE_TOKEN:-}"
 
 # Two instances on ONE host must NOT pin a delivery entry node. Pinning switches
 # delivery to the flat config shape, whose listening ports are FIXED — so the
@@ -77,8 +76,9 @@ export PEERS_DELIVERY_NODE="${PEERS_DELIVERY_NODE-}"
 
 launch() { # name, user-dir, inspector port
   ( cd "$MOD" && \
+    env -u PEERS_STORAGE_TOKEN \
     QT_QPA_PLATFORM=offscreen QML_INSPECTOR_PORT="$3" TMPDIR=/extra/tmp \
-    PEERS_STORAGE_BASE="$PEERS_STORAGE_BASE" PEERS_STORAGE_TOKEN="$PEERS_STORAGE_TOKEN" \
+    PEERS_STORAGE_BASE="$PEERS_STORAGE_BASE" \
     PEERS_DELIVERY_NODE="$PEERS_DELIVERY_NODE" \
     setsid nix run . --accept-flake-config -- --user-dir "$2" \
       > "$WORK/$1.log" 2>&1 &

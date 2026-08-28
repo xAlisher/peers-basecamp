@@ -135,7 +135,7 @@ test("peers_ui: media viewer keeps animated GIFs animated", async (app) => {
   const created = await evalq(app, `(function(){
     var c=Qt.createComponent(Qt.resolvedUrl("MediaViewer.qml"));
     if(c.status!==Component.Ready)return "ERROR: "+c.errorString();
-    var o=c.createObject(root,{objectName:${JSON.stringify(objectName)},images:[{uri:${JSON.stringify(animatedGifUri)},key:"animated-fixture",animated:true}],index:0,width:320,height:240,x:20,y:20,visible:true,z:2000});
+    var o=c.createObject(root,{objectName:${JSON.stringify(objectName)},images:[{uri:${JSON.stringify(animatedGifUri)},key:"animated-fixture",animated:true,decodeWidth:4,decodeHeight:4}],index:0,width:320,height:240,x:20,y:20,visible:true,z:2000});
     return o?o.objectName:"ERROR: createObject returned null";
   })()`);
   assert(created === objectName, `animated viewer creation failed: ${created}`);

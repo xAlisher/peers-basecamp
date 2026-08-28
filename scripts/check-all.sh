@@ -16,6 +16,18 @@ node tests/wire-separator.mjs; rc=$?
 echo "== message layout vs Peers Android =="
 node tests/message-layout.mjs; rc=$?
 [ $rc -ne 0 ] && fail=1
+echo "== hostile GIF byte classification =="
+gif_test=$(mktemp "${TMPDIR:-/extra/tmp}/peers-gif-safety-XXXXXX")
+c++ -std=c++17 -Wall -Wextra -Werror tests/gif-safety.cpp -o "$gif_test" \
+  && "$gif_test"; rc=$?
+rm -f "$gif_test"
+[ $rc -ne 0 ] && fail=1
+echo "== isolated installer dependency pin =="
+node tests/install-iso.mjs; rc=$?
+[ $rc -ne 0 ] && fail=1
+echo "== final artifact identity =="
+node tests/artifact-identity.mjs; rc=$?
+[ $rc -ne 0 ] && fail=1
 echo "== parity matrix =="       ; ./scripts/check-parity.sh;              [ $? -ne 0 ] && fail=1
 # The qmldir trap: qml/qmldir is builder-owned. Shipping our own silently breaks
 # the plugin load (see fails/2026-08-09-*.md and the basecamp skill).

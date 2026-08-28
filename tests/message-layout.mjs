@@ -14,9 +14,17 @@ const chatTsx = resolve(android, 'src/screens/ChatScreen.tsx');
 const voiceTsx = resolve(android, 'src/components/VoiceBubble.tsx');
 const helperPath = resolve(root, 'plugins/peers_ui/src/qml/MessageLayout.js');
 const bubblePath = resolve(root, 'plugins/peers_ui/src/qml/MessageBubble.qml');
+const bubbleMenuPath = resolve(root, 'plugins/peers_ui/src/qml/BubbleActionMenu.qml');
+const viewerPath = resolve(root, 'plugins/peers_ui/src/qml/MediaViewer.qml');
+const peersViewPath = resolve(root, 'plugins/peers_ui/src/qml/PeersView.qml');
 const backendPath = resolve(root, 'plugins/peers_ui/src/PeersUiBackend.cpp');
 const mediaToolsPath = resolve(root, 'plugins/peers_ui/src/MediaTools.cpp');
 const storageClientPath = resolve(root, 'plugins/peers_ui/src/StorageClient.cpp');
+const gifSafetyPath = resolve(root, 'plugins/peers_ui/src/GifSafety.h');
+const contentMarkersPath = resolve(root, 'plugins/peers_ui/src/ContentMarkers.cpp');
+const backendHeaderPath = resolve(root, 'plugins/peers_ui/src/PeersUiBackend.h');
+const repPath = resolve(root, 'plugins/peers_ui/src/peers_ui.rep');
+const composerPath = resolve(root, 'plugins/peers_ui/src/qml/Composer.qml');
 
 function fail(message) {
   console.error(`FAIL: ${message}`);
@@ -95,9 +103,20 @@ for (const pane of [120, 160, 200, 240]) {
 }
 
 const qml = readFileSync(bubblePath, 'utf8');
+const viewer = readFileSync(viewerPath, 'utf8');
+const viewerAnimatedStart = viewer.indexOf('AnimatedImage {');
+const viewerAnimatedEnd = viewer.indexOf('\n    Image {', viewerAnimatedStart);
+const viewerAnimated = viewer.slice(viewerAnimatedStart, viewerAnimatedEnd);
+const peersView = readFileSync(peersViewPath, 'utf8');
+const bubbleMenu = readFileSync(bubbleMenuPath, 'utf8');
 const backend = readFileSync(backendPath, 'utf8');
 const mediaTools = readFileSync(mediaToolsPath, 'utf8');
 const storageClient = readFileSync(storageClientPath, 'utf8');
+const gifSafety = readFileSync(gifSafetyPath, 'utf8');
+const contentMarkers = readFileSync(contentMarkersPath, 'utf8');
+const backendHeader = readFileSync(backendHeaderPath, 'utf8');
+const rep = readFileSync(repPath, 'utf8');
+const composer = readFileSync(composerPath, 'utf8');
 if (!qml.includes('import "MessageLayout.js" as MessageLayout')) fail('MessageBubble does not import MessageLayout');
 if (!qml.includes('MessageLayout.fitMedia')) fail('message media dimensions do not use the stable fit helper');
 if (!qml.includes('MessageLayout.downsampleWaveform')) fail('voice waveform is not bounded/downsampled');
@@ -105,13 +124,80 @@ if (!qml.includes('displayMediaWidth') || !qml.includes('Math.min(maxBubbleWidth
   fail('rendered media is not capped to the current pane width');
 if (!qml.includes('gif.status === Image.Error') || !qml.includes('photo.status === Image.Error'))
   fail('image/GIF decoder failures have no visible state');
-if (!/AnimatedImage\s*\{[\s\S]{0,900}?sourceSize\.width:\s*640[\s\S]{0,200}?cache:\s*false/.test(qml))
+if (!/AnimatedImage\s*\{[\s\S]{0,900}?sourceSize\.width:\s*Number\(root\.msg\.gifDecodeWidth[\s\S]{0,180}?sourceSize\.height:\s*Number\(root\.msg\.gifDecodeHeight[\s\S]{0,200}?cache:\s*false/.test(qml))
   fail('animated GIF decoding is not bounded and cache-disabled');
+if (viewerAnimatedStart < 0 || viewerAnimatedEnd < 0
+    || !/fillMode:\s*Image\.PreserveAspectFit/.test(viewerAnimated)
+    || !/sourceSize\.width:\s*root\.currentDecodeWidth/.test(viewerAnimated)
+    || !/sourceSize\.height:\s*root\.currentDecodeHeight/.test(viewerAnimated))
+  fail('opened GIF does not use trusted aspect-preserving two-axis decode bounds');
+if (!/gif87a[\s\S]{0,300}?gif89a/.test(gifSafety)
+    || !/maxSourceAxis/.test(gifSafety)
+    || !/maxSourcePixels/.test(gifSafety)
+    || !/gifDecodeWidth/.test(backend)
+    || !/gifDecodeHeight/.test(backend))
+  fail('GIF decode bounds are not derived from bounded local file metadata');
+if (/file\.read\(13\)/.test(backend))
+  fail('backend still classifies only a GIF header instead of the complete local file');
+if (!/file\.map\(0,\s*fileSize\)[\s\S]{0,500}GifSafety::classify\([\s\S]{0,300}fileSize/.test(backend))
+  fail('backend does not structurally classify the complete bounded local GIF');
+if (!/const LocalImageClassification classification\s*=\s*classifyLocalImage\(/.test(backend)
+    || !/classification\.isGif[\s\S]{0,500}?row\.insert\(QStringLiteral\("mime"\),\s*QStringLiteral\("image\/gif"\)\)/.test(backend)
+    || !/classification\.isGif[\s\S]{0,700}?gifDecodeWidth[\s\S]{0,180}?gifDecodeHeight/.test(backend)
+    || !/row\.contains\(QStringLiteral\("imageUri"\)\)[\s\S]{0,120}?row\.contains\(QStringLiteral\("localPath"\)\)/.test(backend)
+    || /advertisedImageMime\.startsWith\([\s\S]{0,100}?Qt::CaseInsensitive/.test(backend))
+  fail('peer MIME can bypass local GIF signature classification and two-axis decode bounds');
 if (!qml.includes('enabled: root.voiceReady')) fail('voice playback is enabled without local media');
+if (!/const bool hostedVoice\s*=\s*hmime\.startsWith\(QLatin1String\("audio\/"\)\)/.test(contentMarkers)
+    || !/if \(hostedVoice\)[\s\S]{0,300}?QStringLiteral\("kind"\)[\s\S]{0,100}?QStringLiteral\("voice"\)/.test(contentMarkers)
+    || !/if \(hostedVoice\)[\s\S]{0,500}?QStringLiteral\("durationMs"\), mw/.test(contentMarkers))
+  fail('hosted audio is not parsed as a bounded voice note');
+if (!/if \(row\.contains\(QStringLiteral\("cid"\)\)\)/.test(backend)
+    || !/deferToEventLoop\([\s\S]{0,300}?fetchHostedMedia\(/.test(backend))
+  fail('hosted voice rows do not enter the encrypted media downloader');
+const saveMediaSource = backend.match(/void PeersUiBackend::saveMedia\([\s\S]*?\n}\n/)?.[0] ?? '';
+if (!/const bool hosted\s*=\s*o\.contains\(QStringLiteral\("cid"\)\)/.test(saveMediaSource)
+    || !/if \(hosted && \(kind == QLatin1String\("media"\) \|\| kind == QLatin1String\("voice"\)\)\)/.test(saveMediaSource)
+    || !/bytes = f\.readAll\(\)/.test(saveMediaSource)
+    || !/else if \(kind == QLatin1String\("photo"\) \|\| kind == QLatin1String\("voice"\)\)/.test(saveMediaSource))
+  fail('hosted voice Save does not preserve decrypted cache bytes separately from inline voice');
+const sendRecordingSource = backend.match(/void PeersUiBackend::sendRecording\([\s\S]*?\n}\n/)?.[0] ?? '';
+const uploadVoiceSource = backend.match(/void PeersUiBackend::uploadPendingVoice\([\s\S]*?\n}\n/)?.[0] ?? '';
+if (!/m_pendingVoiceBytes = bytes/.test(sendRecordingSource)
+    || !/uploadPendingVoice\(\)/.test(sendRecordingSource)
+    || !/uploadEncrypted\(m_pendingVoiceBytes/.test(uploadVoiceSource)
+    || !/encodeHostedMedia\([\s\S]{0,500}?durationMs[\s\S]{0,100}?1/.test(uploadVoiceSource))
+  fail('recorded voice still rides inline instead of encrypted hosted media');
 if (!/id:\s*attributionAvatar[\s\S]*?size:\s*16/.test(qml)) fail('incoming attribution does not contain Android-sized 16px avatar');
 if (/HexAvatar\s*\{[\s\S]{0,180}?size:\s*28\b/.test(qml))
   fail('detached 28px message avatar is still present');
 if (!/clip:\s*true/.test(qml)) fail('media frame does not clip images/GIFs to its rounded bubble');
+if (!/visible:\s*root\.videoMessage[\s\S]{0,900}?videoThumbnailUri[\s\S]{0,300}?fillMode:\s*Image\.PreserveAspectCrop/.test(qml))
+  fail('video bubble does not render its generated first-frame thumbnail');
+if (!/generateVideoThumbnail\(/.test(backend)
+    || !/"-protocol_whitelist"[\s\S]{0,120}?"file,crypto,data"/.test(backend)
+    || !/"-frames:v"[\s\S]{0,80}?"1"/.test(backend)
+    || !/scale=640:640:force_original_aspect_ratio=decrease/.test(backend)
+    || !/setStandardOutputFile\(QProcess::nullDevice\(\)\)/.test(backend)
+    || !/setStandardErrorFile\(QProcess::nullDevice\(\)\)/.test(backend)
+    || !/output\.size\(\)\s*<=\s*kMaxVideoThumbnailBytes/.test(backend)
+    || !/QTimer::singleShot\([\s\S]{0,300}?kill\(\)/.test(backend))
+  fail('video thumbnail extraction is absent, unbounded, or permits non-local protocols');
+if (!/m_thumbnailQueue\.enqueue\(/.test(backend)
+    || !/void PeersUiBackend::startNextVideoThumbnail\(\)/.test(backend)
+    || !/if \(m_thumbnailProcess\s*\|\|\s*m_thumbnailQueue\.isEmpty\(\)\)/.test(backend)
+    || !/m_thumbnailProcess\s*=\s*process/.test(backend)
+    || !/m_thumbnailProcess\s*=\s*nullptr[\s\S]{0,180}?startNextVideoThumbnail\(\)/.test(backend))
+  fail('peer videos can spawn unbounded concurrent thumbnail decoder processes');
+if (!/FileDialog\s*\{\s*id:\s*attachDialog[\s\S]{0,320}?options:\s*FileDialog\.DontUseNativeDialog/.test(peersView))
+  fail('attachment picker can disappear during unsupported native-dialog negotiation');
+if (/FileDialog\s*\{\s*id:\s*attachDialog[\s\S]{0,320}?modality:\s*Qt\.NonModal/.test(peersView))
+  fail('forced Quick attachment picker cannot present as a non-modal scene dialog');
+if (!/onAttach:\s*\{[\s\S]{0,240}?attachDialog\.targetConversationId\s*=\s*root\.backend\.currentConversationId[\s\S]{0,160}?attachDialog\.open\(\)/.test(peersView)
+    || !/id:\s*attachDialog[\s\S]{0,180}?property string targetConversationId/.test(peersView)
+    || !/sendMedia\(targetConversationId,\s*p,/.test(peersView)
+    || !/onRejected:[\s\S]{0,100}?targetConversationId\s*=\s*""/.test(peersView))
+  fail('non-modal attachment picker can retarget a file after switching conversations');
 if (!/bool PeersUiBackend::playVideo\([\s\S]*?"ffplay"[\s\S]*?"-autoexit"/.test(backend))
   fail('video playback does not use the managed ffplay path');
 if (!/bool PeersUiBackend::playVideo\([\s\S]*?"-protocol_whitelist"[\s\S]*?"file,crypto,data"/.test(backend))
@@ -138,6 +224,11 @@ if (!/if \(storageToken\(\)\.isEmpty\(\) && cap\.isEmpty\(\)\)/.test(downloadSou
   fail('hosted downloads still require a shared bearer even when a per-blob capability exists');
 if (!/if \(!storageToken\(\)\.isEmpty\(\) && cap\.isEmpty\(\)\)[\s\S]{0,160}?setRawHeader\("Authorization"/.test(downloadSource))
   fail('hosted download still transmits the legacy bearer with a per-blob capability');
+if (!/ContentLengthHeader/.test(downloadSource)
+    || !/&QIODevice::readyRead/.test(downloadSource)
+    || !/reply->abort\(\)/.test(downloadSource)
+    || /const QByteArray blob = reply->readAll\(\)/.test(downloadSource))
+  fail('hosted downloads are not bounded before peer-controlled response buffering');
 if (!/QString StorageClient::cacheFileFor\(const QString& cid, const QString& mime\)/.test(storageClient)
     || !/cacheFileFor\(cid, mime\)/.test(downloadSource))
   fail('hosted media cache paths do not retain a decoder-safe MIME suffix');
@@ -147,7 +238,68 @@ if (!/MediaTools::mediaCacheDir\(\)/.test(cachePathSource))
 const cacheSuffixSource = storageClient.match(/QString StorageClient::cacheSuffixForMime\([\s\S]*?\n}\n/)?.[0] ?? '';
 if (!/image\/jpeg[\s\S]*?\.jpg/.test(cacheSuffixSource)
     || !/image\/png[\s\S]*?\.png/.test(cacheSuffixSource)
+    || !/audio\/mp4[\s\S]*?\.m4a/.test(cacheSuffixSource)
     || !/return QStringLiteral\("\.bin"\)/.test(cacheSuffixSource))
   fail('hosted cache suffixes are not fixed/allowlisted with a safe .bin fallback');
+const uploadSource = storageClient.match(/void StorageClient::uploadEncrypted\([\s\S]*?\n}\n\n\/\/ ── download/)?.[0] ?? '';
+if (!/\/data\/upload-challenges/.test(uploadSource)
+    || !/\/data\/upload-grants/.test(uploadSource)
+    || !/X-Upload-Grant/.test(uploadSource))
+  fail('hosted uploads do not use the one-use upload-grant protocol');
+if (/setRawHeader\("Authorization"/.test(uploadSource) || /if \(!uploadConfigured\(\)\)/.test(uploadSource))
+  fail('hosted uploads still depend on a reusable bearer credential');
+if (!/QThread::create/.test(uploadSource))
+  fail('upload proof-of-work is not kept off the Basecamp UI thread');
+if (/exactInteger\(const QJsonValue&/.test(storageClient)
+    || !/exactIntegerToken\(const QByteArray& token/.test(storageClient)
+    || !/toLongLong\(&ok, 10\)/.test(storageClient))
+  fail('upload grant integers are not validated from exact integral JSON tokens');
+if (/globalMatch\(QString::fromUtf8\(body\)\)/.test(storageClient)
+    || !/challengeTokens\.value\(QStringLiteral\("difficulty"\)\)/.test(storageClient)
+    || !/grantTokens\.value\(QStringLiteral\("max_bytes"\)\)/.test(storageClient))
+  fail('upload grant integers are not bound to their decoded top-level members');
+if (/QString::fromUtf8\(uploadBody\)\.trimmed\(\)/.test(uploadSource)
+    || !/QString::fromUtf8\(uploadBody\)/.test(uploadSource))
+  fail('upload response accepts whitespace instead of the exact cid:cap form');
+if (!/info\.size\(\).*maxHostedPlaintextBytes/s.test(backend))
+  fail('hosted media size is not rejected before reading the selected file');
+if (!/f\.read\(StorageClient::maxHostedPlaintextBytes\(\) \+ 1\)/.test(backend)
+    || /const QByteArray bytes = f\.readAll\(\)/.test(backend))
+  fail('hosted file reads are not bounded against metadata and symlink races');
+if (!/readError != QFile::NoError/.test(backend))
+  fail('partial hosted file reads are not rejected');
+if (!/QElapsedTimer/.test(storageClient) || !/std::numeric_limits<qint64>::max\(\)/.test(storageClient))
+  fail('upload proof work lacks monotonic and overflow-safe bounds');
+if (!/uniqueTopLevelObjectKeys/.test(storageClient)
+    || !/if \(!keys\.insert\(key\)\.second\)/.test(storageClient))
+  fail('upload grant JSON does not reject duplicate members independent of value type');
+if (!/objectName: "peersRoot"/.test(peersView)
+    || !/objectName: "nav-" \+ modelData\.key/.test(peersView))
+  fail('PeersView lacks stable Sitometres selectors');
+if (/o\.insert\(QStringLiteral\("(?:key|cap)"\)/.test(contentMarkers))
+  fail('hosted decryption key/capability crosses the C++/QML boundary');
+if (!/!ContentMarkers::containsHostedReference\(content\)/.test(backend))
+  fail('hosted raw marker can still be inserted into a QML row');
+if (!/bool containsHostedReference\(const QString& raw\)/.test(contentMarkers)
+    || !/containsHostedReference\(body\)[\s\S]{0,120}?\[hosted media\]/.test(contentMarkers))
+  fail('reply-wrapped hosted secrets are not redacted before QML');
+if (!/body\.size\(\) > kMaxBody[\s\S]{0,100}?reply1:/.test(contentMarkers))
+  fail('oversized reply wrappers can bypass hosted-secret redaction');
+if (!/encodeHostedMedia\([\s\S]{0,300}?false\);/.test(backend))
+  fail('a hosted send failure can still restore its secret marker into the composer');
+if (!/show: !root\.isImage && !root\.isVoice && !root\.isHosted/.test(bubbleMenu))
+  fail('hosted marker can still be copied through QML');
+if (!/m_pendingVoiceBytes/.test(backendHeader)
+    || !/void PeersUiBackend::retryVoice\(\)/.test(backend)
+    || !/void PeersUiBackend::discardVoice\(\)/.test(backend))
+  fail('failed recorded voice is not retained with retry/discard operations');
+if (!/PROP\(bool\s+voiceRetryAvailable=false READONLY\)/.test(rep)
+    || !/SLOT\(void retryVoice\(\)\)/.test(rep)
+    || !/SLOT\(void discardVoice\(\)\)/.test(rep))
+  fail('voice retry state is missing from the QtRO contract');
+if (!/property bool voiceRetryAvailable: false/.test(composer)
+    || !/signal retryVoice\(\)/.test(composer)
+    || !/signal discardVoice\(\)/.test(composer))
+  fail('composer does not expose failed-voice Retry/Discard controls');
 
 if (!process.exitCode) console.log('ok: message layout matches Android sizing and avatar/media contracts');

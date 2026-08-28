@@ -17,6 +17,7 @@ import "Theme.js" as Theme
 //
 Rectangle {
     id: root
+    objectName: "peersRoot"
 
     implicitWidth: 1100
     implicitHeight: 720
@@ -73,7 +74,9 @@ Rectangle {
                 out.push({
                     uri: String(m.imageUri),
                     key: String(m.key),
-                    animated: String(m.mime || "") === "image/gif"
+                    animated: String(m.mime || "") === "image/gif",
+                    decodeWidth: Number(m.gifDecodeWidth || 0),
+                    decodeHeight: Number(m.gifDecodeHeight || 0)
                 });
         }
         return out;
@@ -222,6 +225,7 @@ Rectangle {
                     ]
                     delegate: Rectangle {
                         required property var modelData
+                        objectName: "nav-" + modelData.key
                         Layout.alignment: Qt.AlignHCenter
                         width: 44
                         height: 44
@@ -565,14 +569,21 @@ Rectangle {
                                  : "Message"
                     replyingTo: root.replyingTo
                     onCancelReply: root.replyingTo = ({})
-                    onAttach: attachDialog.open()
+                    onAttach: {
+                        attachDialog.targetConversationId = root.backend.currentConversationId;
+                        if (attachDialog.targetConversationId !== "")
+                            attachDialog.open();
+                    }
                     onShareLocation: locationDialog.open()
                     recording: root.backend ? root.backend.recording : false
                     recordingMs: root.backend ? root.backend.recordingMs : 0
+                    voiceRetryAvailable: root.backend ? root.backend.voiceRetryAvailable : false
                     onStartRecord: root.call(root.backend.startRecording())
                     onCancelRecord: root.call(root.backend.cancelRecording())
                     onSendRecord: root.call(
                         root.backend.sendRecording(root.backend.currentConversationId))
+                    onRetryVoice: root.call(root.backend.retryVoice())
+                    onDiscardVoice: root.call(root.backend.discardVoice())
                     onSend: function (body) {
                         if (composer.isReplying) {
                             root.call(root.backend.sendReply(root.backend.currentConversationId,
@@ -625,8 +636,6 @@ Rectangle {
             "https://www.openstreetmap.org/?mlat=" + bubbleMenu.msg.lat
             + "&mlon=" + bubbleMenu.msg.lng))
         onCopyMessage: {
-            // Android copies the RAW body here, not the rendered text — which is
-            // why a hosted GIF copies its marker. Matching that.
             if (clipboard.copyText(bubbleMenu.msg.raw !== undefined
                                    ? bubbleMenu.msg.raw : bubbleMenu.msg.text))
                 toast.show("Copied");
@@ -939,17 +948,24 @@ Rectangle {
     // Attach a file to send.
     FileDialog {
         id: attachDialog
+        property string targetConversationId: ""
         title: "Send a file"
+        options: FileDialog.DontUseNativeDialog
         fileMode: FileDialog.OpenFile
         nameFilters: ["Images and media (*.png *.jpg *.jpeg *.gif *.webp *.mp4 *.webm *.m4a *.ogg)",
                       "All files (*)"]
         onAccepted: {
+            const targetConversationId = attachDialog.targetConversationId;
+            attachDialog.targetConversationId = "";
+            if (targetConversationId === "")
+                return;
             // A plain filesystem path, never a file:// URL — sendMedia requires it.
             const p = selectedFile.toString().replace("file://", "");
             const audio = /\.(m4a|mp3|ogg|opus|wav)$/i.test(p);
-            root.call(root.backend.sendMedia(root.backend.currentConversationId, p,
+            root.call(root.backend.sendMedia(targetConversationId, p,
                                              audio ? "voice" : "media"));
         }
+        onRejected: targetConversationId = ""
     }
 
     // Add / edit a contact label. Local only — Android says so on this screen and

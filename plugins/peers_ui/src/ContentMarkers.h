@@ -122,6 +122,10 @@ bool imageSize(const QByteArray& bytes, int* width, int* height);
 // The marker class of a raw body, without decoding it.
 Kind classify(const QString& raw);
 
+// True when the body is a hosted marker or a reply wrapper whose nested body
+// eventually resolves to one. Used to keep keys/capabilities backend-only.
+bool containsHostedReference(const QString& raw);
+
 } // namespace ContentMarkers
 
 #endif // PEERS_CONTENT_MARKERS_H

@@ -7,6 +7,7 @@
 #include <functional>
 
 class QNetworkAccessManager;
+class QNetworkRequest;
 
 //
 // Logos-Storage hosted media — the `store2:` path, ported from Peers Android's
@@ -28,15 +29,16 @@ class QNetworkAccessManager;
 //
 //     iv(12) || AES-256-GCM( Padmé-padded plaintext ) || tag(16)
 //
-// CONFIGURATION. The token is a legacy migration credential for uploads and
-// capless downloads. It must not be embedded in an LGX or installation. New
-// downloads use their per-blob capability without transmitting this bearer.
+// CONFIGURATION. Uploads acquire anonymous short-lived exact-size one-use
+// grants. The token is retained only as a migration credential for capless
+// downloads and must not be embedded in an LGX or installation. New downloads
+// use their per-blob capability without transmitting this bearer.
 //
 //     PEERS_STORAGE_BASE   default https://msg.logos.live/s/api/storage/v1
 //     PEERS_STORAGE_TOKEN  default empty
 //
-// With no token, uploads and legacy capless downloads fail closed. A validated
-// capability-bearing marker may still be fetched.
+// With no token, legacy capless downloads fail closed. Uploads and validated
+// capability-bearing downloads remain available.
 //
 class StorageClient : public QObject
 {
@@ -46,8 +48,6 @@ public:
     explicit StorageClient(QObject* parent = nullptr);
     ~StorageClient() override;
 
-    // Whether the legacy upload path is configured.
-    bool uploadConfigured() const;
     QString baseUrl() const;
 
     struct Uploaded {
@@ -61,6 +61,7 @@ public:
 
     // Pad → encrypt → POST. `bytes` is the raw file.
     void uploadEncrypted(const QByteArray& bytes, UploadCb cb);
+    static qint64 maxHostedPlaintextBytes();
 
     // GET → decrypt → unpad → cache. Returns a local file path.
     //
@@ -83,6 +84,9 @@ public:
     static bool validKeyB64(const QString& keyB64);   // must decode to exactly 32 bytes
 
 private:
+    using PostCb = std::function<void(bool ok, QByteArray body, QString error)>;
+    void postBounded(QNetworkRequest request, const QByteArray& body, PostCb cb);
+
     QNetworkAccessManager* m_net = nullptr;
 };
 

@@ -173,6 +173,29 @@ Kind classify(const QString& raw)
     return looksLikeMarker(raw) ? Kind::Unknown : Kind::Text;
 }
 
+bool containsHostedReference(const QString& raw)
+{
+    QString body = raw;
+    for (int depth = 0; depth < 4; ++depth) {
+        if (body.startsWith(QLatin1String("store1:"))
+            || body.startsWith(QLatin1String("store2:")))
+            return true;
+        if (body.size() > kMaxBody)
+            return body.startsWith(QLatin1String("reply1:"));
+        const Kind kind = classify(body);
+        if (kind != Kind::Reply)
+            return false;
+        const QString payload = body.mid(QStringLiteral("reply1:").size());
+        const int sep = payload.indexOf(QLatin1Char(':'));
+        if (sep < 0)
+            return false;
+        body = payload.mid(sep + 1);
+    }
+    // More nesting than we intentionally parse is hostile/ambiguous. Keep it
+    // backend-only rather than risking a deeply wrapped capability leak.
+    return true;
+}
+
 QString messageKey(const QString& author, const QString& body)
 {
     // Two-word FNV-1a over "<author> <body>", iterating UTF-16 code units, with
@@ -240,30 +263,35 @@ QJsonObject decodeToJson(const QString& raw)
         }
         const int mw = fields.value(3).toInt();
         const int mh = fields.value(4).toInt();
-        if (mw < 1 || mw > 100000 || mh < 1 || mh > 100000) {
+        const QString hmime = fields.value(2).toLower();
+        const bool hostedVoice = hmime.startsWith(QLatin1String("audio/"));
+        if (mw < 1 || mw > (hostedVoice ? 120000 : 100000)
+            || mh < 1 || mh > 100000 || (hostedVoice && mh != 1)) {
             o.insert(QStringLiteral("kind"), kindName(Kind::Unknown));
             o.insert(QStringLiteral("text"), QStringLiteral("[unreadable media]"));
             break;
         }
         o.insert(QStringLiteral("padded"), raw.startsWith(QLatin1String("store2:")));
-        // The 6th field is the fetch CAPABILITY, not a caption. There is no
-        // caption field in this grammar at all (docs/CONTENT-MARKERS.md §1) —
-        // treating the cap as one printed a hex blob as the message body.
-        o.insert(QStringLiteral("cap"), fields.value(5));
         o.insert(QStringLiteral("cid"), fields.value(0));
-        o.insert(QStringLiteral("mime"), fields.value(2));
+        o.insert(QStringLiteral("mime"), hmime);
         o.insert(QStringLiteral("width"), mw);
         o.insert(QStringLiteral("height"), mh);
         // The decryption key is deliberately NOT surfaced to QML.
-        const QString hmime = fields.value(2);
-        o.insert(QStringLiteral("text"),
-                 hmime.startsWith(QLatin1String("video"))
-                     ? QStringLiteral("Video")
-                     : (hmime == QLatin1String("image/gif")
-                            ? QStringLiteral("GIF")
-                            : (hmime.startsWith(QLatin1String("image"))
-                                   ? QStringLiteral("📷 Photo")
-                                   : QStringLiteral("Media"))));
+        if (hostedVoice) {
+            o.insert(QStringLiteral("kind"), QStringLiteral("voice"));
+            o.insert(QStringLiteral("durationMs"), mw);
+            o.insert(QStringLiteral("waveform"), QJsonArray());
+            o.insert(QStringLiteral("text"), QStringLiteral("🎤 Voice message"));
+        } else {
+            o.insert(QStringLiteral("text"),
+                     hmime.startsWith(QLatin1String("video"))
+                         ? QStringLiteral("Video")
+                         : (hmime == QLatin1String("image/gif")
+                                ? QStringLiteral("GIF")
+                                : (hmime.startsWith(QLatin1String("image"))
+                                       ? QStringLiteral("📷 Photo")
+                                       : QStringLiteral("Media"))));
+        }
         break;
     }
     case Kind::InlinePhoto: {
@@ -322,7 +350,9 @@ QJsonObject decodeToJson(const QString& raw)
         const QString body = sep < 0 ? payload : payload.mid(sep + 1);
         o.insert(QStringLiteral("replyToKey"), key.left(kMaxKeyLen));
         // The quoted body is itself a raw body and may carry its own marker.
-        o.insert(QStringLiteral("text"), previewText(body));
+        o.insert(QStringLiteral("text"), containsHostedReference(body)
+                                             ? QStringLiteral("[hosted media]")
+                                             : previewText(body));
         o.insert(QStringLiteral("innerKind"), kindName(classify(body)));
         break;
     }

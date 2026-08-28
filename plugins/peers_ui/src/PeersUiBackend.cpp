@@ -6,15 +6,18 @@
 #include "logos_sdk.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QFileInfo>
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
 #include <QStandardPaths>
 #include <QSet>
+#include <QSize>
 #include <QTimer>
 
 #include "BackupReader.h"
+#include "GifSafety.h"
 #include "StorageClient.h"
 #include "MediaTools.h"
 #include "VoiceRecorder.h"
@@ -30,6 +33,33 @@ namespace {
 // explicitly so the choice is visible rather than implied by a default.
 constexpr const char* kDefaultDeliveryPreset = "logos.test";
 constexpr const char* kChatLogLevel = "info";
+constexpr long long kMaxVideoThumbnailBytes = 2 * 1024 * 1024;
+
+using LocalImageClassification = GifSafety::Classification;
+
+LocalImageClassification classifyLocalImage(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    const qint64 fileSize = file.size();
+    const QByteArray signature = file.read(6);
+    const LocalImageClassification signedClassification = GifSafety::classify(
+        reinterpret_cast<const unsigned char*>(signature.constData()),
+        static_cast<std::size_t>(signature.size()));
+    if (!signedClassification.isGif)
+        return {};
+    if (fileSize < 6 || static_cast<quint64>(fileSize) > GifSafety::maxFileBytes)
+        return signedClassification;
+
+    uchar* mapped = file.map(0, fileSize);
+    if (!mapped)
+        return signedClassification;
+    const LocalImageClassification classification = GifSafety::classify(
+        mapped, static_cast<std::size_t>(fileSize));
+    file.unmap(mapped);
+    return classification;
+}
 
 // The delivery entry node Peers Android pins by default
 // (src/stores/deliveryNode.ts: DEFAULT_DELIVERY_NODE). Entering the cluster
@@ -393,7 +423,9 @@ bool PeersUiBackend::loadMessages(const QString& convoId)
         // on the rendered text (Android's "Copy message" copies this). Omitted
         // for inline payloads, which would put megabytes of base64 into the
         // view-model for no benefit — Android excludes those from copy anyway.
-        if (kind != ContentMarkers::Kind::InlinePhoto && kind != ContentMarkers::Kind::VoiceNote)
+        if (kind != ContentMarkers::Kind::InlinePhoto
+            && kind != ContentMarkers::Kind::VoiceNote
+            && !ContentMarkers::containsHostedReference(content))
             row.insert(QStringLiteral("raw"), content);
         row.insert(QStringLiteral("fromSelf"), fromSelf);
         row.insert(QStringLiteral("timestampMs"),
@@ -409,7 +441,7 @@ bool PeersUiBackend::loadMessages(const QString& convoId)
 
         // Hosted media: hand the view a local file once we have it, and start
         // the fetch when we do not. The decryption key never reaches QML.
-        if (row.value(QStringLiteral("kind")).toString() == QLatin1String("media")) {
+        if (row.contains(QStringLiteral("cid"))) {
             const QString cid = row.value(QStringLiteral("cid")).toString();
             const QStringList mf = content.mid(content.indexOf(QLatin1Char(':')) + 1)
                                        .split(QLatin1Char(':'));
@@ -418,8 +450,14 @@ bool PeersUiBackend::loadMessages(const QString& convoId)
             const QString mcap = mf.value(5);
             if (m_mediaPaths.contains(cid)) {
                 row.insert(QStringLiteral("localPath"), m_mediaPaths.value(cid));
-                row.insert(QStringLiteral("imageUri"),
-                           QUrl::fromLocalFile(m_mediaPaths.value(cid)).toString());
+                if (!mmime.startsWith(QLatin1String("audio/")))
+                    row.insert(QStringLiteral("imageUri"),
+                               QUrl::fromLocalFile(m_mediaPaths.value(cid)).toString());
+                if (mmime.startsWith(QLatin1String("video/"))
+                    && m_videoThumbnailPaths.contains(cid)) {
+                    row.insert(QStringLiteral("videoThumbnailUri"),
+                               QUrl::fromLocalFile(m_videoThumbnailPaths.value(cid)).toString());
+                }
             } else if (m_mediaErrors.contains(cid)) {
                 row.insert(QStringLiteral("mediaError"), m_mediaErrors.value(cid));
             } else if (!cid.isEmpty()) {
@@ -459,6 +497,31 @@ bool PeersUiBackend::loadMessages(const QString& convoId)
                                    QUrl::fromLocalFile(path).toString());
                     }
                 }
+            }
+        }
+
+        // Classify every local file exposed through imageUri from its bytes, never
+        // from peer MIME. Qt image decoders sniff content, so a GIF advertised as
+        // PNG, video, or arbitrary data must receive the same two-axis bounds. A
+        // claimed GIF with non-GIF bytes fails closed; ordinary non-GIF files are
+        // unchanged.
+        const QString advertisedImageMime = row.value(QStringLiteral("mime")).toString();
+        if (row.contains(QStringLiteral("imageUri"))
+            && row.contains(QStringLiteral("localPath"))) {
+            const LocalImageClassification classification = classifyLocalImage(
+                row.value(QStringLiteral("localPath")).toString());
+            const bool claimedGif = advertisedImageMime.compare(
+                QLatin1String("image/gif"), Qt::CaseInsensitive) == 0;
+            if (classification.isGif && classification.isValid()) {
+                row.insert(QStringLiteral("mime"), QStringLiteral("image/gif"));
+                row.insert(QStringLiteral("gifDecodeWidth"),
+                           classification.decodeWidth);
+                row.insert(QStringLiteral("gifDecodeHeight"),
+                           classification.decodeHeight);
+            } else if (classification.isGif || claimedGif) {
+                row.remove(QStringLiteral("imageUri"));
+                row.remove(QStringLiteral("localPath"));
+                row.insert(QStringLiteral("mediaError"), QStringLiteral("Media unavailable"));
             }
         }
 
@@ -605,19 +668,26 @@ void PeersUiBackend::createConversation(QString peerAddress)
 
 void PeersUiBackend::sendMessage(QString conversationId, QString content)
 {
+    sendMessageInternal(conversationId, content, true);
+}
+
+bool PeersUiBackend::sendMessageInternal(const QString& conversationId, const QString& content,
+                                         bool restoreToComposer)
+{
     if (conversationId.isEmpty() || content.isEmpty())
-        return;
+        return false;
     const LogosResult res = modules().peers_core.send_message(conversationId, content);
     if (!res.success) {
         reportFailure(QStringLiteral("Message not sent"), res.getError<QString>());
-        // Hand the text back so the composer can restore it.
-        Q_EMIT sendFailed(conversationId, content);
-        return;
+        if (restoreToComposer)
+            Q_EMIT sendFailed(conversationId, content);
+        return false;
     }
     m_drafts.remove(conversationId);
     if (conversationId == currentConversationId())
         setCurrentDraft(QString());
     saveState();
+    return true;
 }
 
 void PeersUiBackend::retryMessage(QString conversationId, QString localId)
@@ -893,8 +963,9 @@ void PeersUiBackend::forwardMessage(QString fromConversationId, QString messageI
         const int sep = raw.indexOf(QLatin1Char(':'), QStringLiteral("reply1:").size());
         raw = sep < 0 ? raw : raw.mid(sep + 1);
     }
-    sendMessage(toConversationId, raw);
-    Q_EMIT toast(QStringLiteral("Forwarded"));
+    if (sendMessageInternal(toConversationId, raw,
+                            !ContentMarkers::containsHostedReference(raw)))
+        Q_EMIT toast(QStringLiteral("Forwarded"));
 }
 void PeersUiBackend::reactToMessage(QString conversationId, QString messageId, QString emoji)
 {
@@ -947,14 +1018,14 @@ void PeersUiBackend::deleteMessageForMe(QString conversationId, QString messageI
 }
 void PeersUiBackend::copyToClipboard(QString text)
 {
-    // The clipboard lives in the view process, so QML does the actual copy; this
-    // exists so a caller can ask for the RAW body of a message by key (what
-    // Android's "Copy message" copies) rather than its display text.
+    // The clipboard lives in the view process, so QML copies display-safe text.
+    // Hosted raw markers are backend-only and never call this slot.
     Q_UNUSED(text)
     Q_EMIT toast(QStringLiteral("Copied"));
 }
 void PeersUiBackend::sendMedia(QString conversationId, QString localPath, QString kind)
 {
+    Q_UNUSED(kind)
     if (conversationId.isEmpty() || localPath.isEmpty())
         return;
 
@@ -965,14 +1036,29 @@ void PeersUiBackend::sendMedia(QString conversationId, QString localPath, QStrin
         report(QStringLiteral("That file does not exist: %1").arg(info.fileName()));
         return;
     }
+    if (info.size() > StorageClient::maxHostedPlaintextBytes()) {
+        report(QStringLiteral("%1 is too large to send. Nothing was read or sent.")
+                   .arg(info.fileName()));
+        return;
+    }
 
     QFile f(localPath);
     if (!f.open(QIODevice::ReadOnly)) {
         report(QStringLiteral("Could not read %1").arg(info.fileName()));
         return;
     }
-    const QByteArray bytes = f.readAll();
+    const QByteArray bytes = f.read(StorageClient::maxHostedPlaintextBytes() + 1);
+    const QFile::FileError readError = f.error();
     f.close();
+    if (readError != QFile::NoError) {
+        report(QStringLiteral("Could not completely read %1. Nothing was sent.")
+                   .arg(info.fileName()));
+        return;
+    }
+    if (bytes.size() > StorageClient::maxHostedPlaintextBytes()) {
+        report(QStringLiteral("%1 grew too large to send. Nothing was sent.").arg(info.fileName()));
+        return;
+    }
 
     // Videos and audio must carry their real type: the receiver picks a player
     // from the mime, and calling an mp4 "image/png" makes it unplayable on both
@@ -1002,13 +1088,6 @@ void PeersUiBackend::sendMedia(QString conversationId, QString localPath, QStrin
     const bool isImage = mime.startsWith(QLatin1String("image/"));
     const bool isVideo = mime.startsWith(QLatin1String("video/"));
 
-    if (kind == QLatin1String("voice")) {
-        // Duration and waveform are the recorder's to supply; sending zeros is
-        // honest about not having them rather than inventing a shape.
-        sendMessage(conversationId,
-                    ContentMarkers::encodeVoiceNote(QStringLiteral("audio/mp4"), 0, {}, bytes));
-        return;
-    }
 
     int w = 0, h = 0;
     const bool hasEmbeddedImageSize = isImage && ContentMarkers::imageSize(bytes, &w, &h);
@@ -1033,21 +1112,6 @@ void PeersUiBackend::sendMedia(QString conversationId, QString localPath, QStrin
         return;
     }
 
-    if (!storage()->uploadConfigured()) {
-        report(isImage
-                   ? QStringLiteral("%1 is %2 KB — too large to send inline (limit %3 KB), and "
-                                    "hosted media is not configured on this install. Set "
-                                    "PEERS_STORAGE_TOKEN to enable it. Nothing was sent.")
-                         .arg(info.fileName())
-                         .arg(bytes.size() / 1024)
-                         .arg(ContentMarkers::maxInlineBytes() / 1024)
-                   : QStringLiteral("%1 can only be sent as hosted media, which is not configured "
-                                    "on this install. Set PEERS_STORAGE_TOKEN to enable it. "
-                                    "Nothing was sent.")
-                         .arg(info.fileName()));
-        return;
-    }
-
     report(QStringLiteral("Uploading %1 (%2 KB)…").arg(info.fileName()).arg(bytes.size() / 1024));
     storage()->uploadEncrypted(bytes, [this, conversationId, mime, w, h](
                                           bool ok, StorageClient::Uploaded u, QString err) {
@@ -1055,8 +1119,10 @@ void PeersUiBackend::sendMedia(QString conversationId, QString localPath, QStrin
             report(err);
             return;
         }
-        sendMessage(conversationId,
-                    ContentMarkers::encodeHostedMedia(u.cid, u.keyB64, mime, w, h, u.cap));
+        sendMessageInternal(conversationId,
+                            ContentMarkers::encodeHostedMedia(
+                                u.cid, u.keyB64, mime, w, h, u.cap),
+                            false);
     });
 }
 
@@ -1095,7 +1161,7 @@ void PeersUiBackend::fetchHostedMedia(const QString& convoId, const QString& cid
     m_fetching.insert(token);
 
     storage()->downloadDecrypt(cid, keyB64, cap, mime,
-                               [this, convoId, token](bool ok, QString path, QString err) {
+                               [this, convoId, token, mime](bool ok, QString path, QString err) {
                                    m_fetching.remove(token);
                                    if (!ok) {
                                        m_mediaErrors.insert(token, err);
@@ -1106,12 +1172,114 @@ void PeersUiBackend::fetchHostedMedia(const QString& convoId, const QString& cid
                                    }
                                    m_mediaErrors.remove(token);
                                    m_mediaPaths.insert(token, path);
+                                   if (mime.startsWith(QLatin1String("video/")))
+                                       generateVideoThumbnail(convoId, token, path);
                                    // Re-render the thread so the bubble picks up
                                    // the now-local file.
                                    if (convoId == currentConversationId())
                                        loadMessages(convoId);
                                });
 }
+
+void PeersUiBackend::generateVideoThumbnail(const QString& convoId, const QString& cid,
+                                            const QString& videoPath)
+{
+    if (cid.isEmpty() || videoPath.isEmpty() || m_thumbnailing.contains(cid)
+        || m_videoThumbnailPaths.contains(cid)) {
+        return;
+    }
+
+    const QString basename = QString::fromLatin1(
+        QCryptographicHash::hash(cid.toUtf8(), QCryptographicHash::Sha256).toHex());
+    const QString thumbnailPath = QDir(MediaTools::mediaCacheDir())
+                                      .filePath(QStringLiteral("video-thumb-%1.jpg").arg(basename));
+    const QFileInfo cached(thumbnailPath);
+    if (cached.isFile() && cached.size() > 0
+        && cached.size() <= kMaxVideoThumbnailBytes) {
+        m_videoThumbnailPaths.insert(cid, thumbnailPath);
+        if (convoId == currentConversationId())
+            loadMessages(convoId);
+        return;
+    }
+    QFile::remove(thumbnailPath);
+
+    m_thumbnailing.insert(cid);
+    m_thumbnailQueue.enqueue({convoId, cid, videoPath});
+    startNextVideoThumbnail();
+}
+
+void PeersUiBackend::startNextVideoThumbnail()
+{
+    if (m_thumbnailProcess || m_thumbnailQueue.isEmpty())
+        return;
+
+    const VideoThumbnailJob job = m_thumbnailQueue.dequeue();
+    const QString exe = MediaTools::resolveBin(QStringLiteral("ffmpeg"));
+    if (exe.isEmpty()) {
+        m_thumbnailing.remove(job.cid);
+        startNextVideoThumbnail();
+        return;
+    }
+
+    const QString basename = QString::fromLatin1(
+        QCryptographicHash::hash(job.cid.toUtf8(), QCryptographicHash::Sha256).toHex());
+    const QString thumbnailPath = QDir(MediaTools::mediaCacheDir())
+                                      .filePath(QStringLiteral("video-thumb-%1.jpg").arg(basename));
+    QFile::remove(thumbnailPath);
+
+    QProcess* process = new QProcess(this);
+    m_thumbnailProcess = process;
+    process->setProcessEnvironment(MediaTools::cleanSpawnEnv());
+    process->setStandardOutputFile(QProcess::nullDevice());
+    process->setStandardErrorFile(QProcess::nullDevice());
+    process->setProgram(exe);
+    process->setArguments({QStringLiteral("-hide_banner"),
+                           QStringLiteral("-loglevel"), QStringLiteral("error"),
+                           QStringLiteral("-nostdin"),
+                           QStringLiteral("-protocol_whitelist"),
+                           QStringLiteral("file,crypto,data"),
+                           QStringLiteral("-i"), job.videoPath,
+                           QStringLiteral("-frames:v"), QStringLiteral("1"),
+                           QStringLiteral("-vf"),
+                           QStringLiteral("scale=640:640:force_original_aspect_ratio=decrease"),
+                           QStringLiteral("-q:v"), QStringLiteral("3"),
+                           QStringLiteral("-y"), thumbnailPath});
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this, process, job, thumbnailPath](int code, QProcess::ExitStatus status) {
+                if (m_thumbnailProcess != process)
+                    return;
+                m_thumbnailProcess = nullptr;
+                m_thumbnailing.remove(job.cid);
+                const QFileInfo output(thumbnailPath);
+                if (status == QProcess::NormalExit && code == 0
+                    && output.isFile() && output.size() > 0
+                    && output.size() <= kMaxVideoThumbnailBytes) {
+                    m_videoThumbnailPaths.insert(job.cid, thumbnailPath);
+                    if (job.convoId == currentConversationId())
+                        loadMessages(job.convoId);
+                } else {
+                    QFile::remove(thumbnailPath);
+                }
+                process->deleteLater();
+                startNextVideoThumbnail();
+            });
+    connect(process, &QProcess::errorOccurred, this,
+            [this, process, job, thumbnailPath](QProcess::ProcessError error) {
+                if (error == QProcess::FailedToStart && m_thumbnailProcess == process) {
+                    m_thumbnailProcess = nullptr;
+                    m_thumbnailing.remove(job.cid);
+                    QFile::remove(thumbnailPath);
+                    process->deleteLater();
+                    startNextVideoThumbnail();
+                }
+            });
+    QTimer::singleShot(5000, process, [process] {
+        if (process->state() != QProcess::NotRunning)
+            process->kill();
+    });
+    process->start();
+}
+
 void PeersUiBackend::openExternal(QString url)
 {
     // The map link is built from peer-supplied coordinates, so the scheme is
@@ -1333,10 +1501,12 @@ void PeersUiBackend::saveMedia(QString messageId, QString destPath)
 
     const QJsonObject o = ContentMarkers::decodeToJson(raw);
     const QString kind = o.value(QStringLiteral("kind")).toString();
+    const bool hosted = o.contains(QStringLiteral("cid"));
 
     QByteArray bytes;
-    if (kind == QLatin1String("media")) {
-        // Hosted media is already decrypted into the cache by the fetch path.
+    if (hosted && (kind == QLatin1String("media") || kind == QLatin1String("voice"))) {
+        // Hosted media and hosted voice are already decrypted into the cache by
+        // the fetch path. Copy the bytes verbatim; never re-encode voice data.
         const QString cached = m_mediaPaths.value(o.value(QStringLiteral("cid")).toString());
         QFile f(cached);
         if (cached.isEmpty() || !f.open(QIODevice::ReadOnly)) {
@@ -1369,6 +1539,10 @@ void PeersUiBackend::saveMedia(QString messageId, QString destPath)
 }
 void PeersUiBackend::startRecording()
 {
+    if (!m_pendingVoiceBytes.isEmpty()) {
+        report(QStringLiteral("Retry or discard the unsent voice message first."));
+        return;
+    }
     if (!m_recorder) {
         m_recorder = new VoiceRecorder(this);
         connect(m_recorder, &VoiceRecorder::tick, this,
@@ -1427,21 +1601,56 @@ void PeersUiBackend::sendRecording(QString conversationId)
         return;
     }
 
-    // A voice note rides inline like a photo. Two minutes of 32 kbit AAC is
-    // ~480 KB, so a long one can still exceed the inline ceiling; refuse
-    // explicitly rather than emitting a message the peer cannot decode.
-    if (bytes.size() > ContentMarkers::maxInlineBytes()) {
-        report(QStringLiteral("That voice note is %1 KB, over the %2 KB message limit. "
-                              "Record a shorter one.")
-                   .arg(bytes.size() / 1024)
-                   .arg(ContentMarkers::maxInlineBytes() / 1024));
-        return;
-    }
+    Q_UNUSED(waveform)
+    m_pendingVoiceBytes = bytes;
+    m_pendingVoiceMime = mime;
+    m_pendingVoiceConversationId = conversationId;
+    m_pendingVoiceDurationMs = durationMs;
+    uploadPendingVoice();
+}
 
-    sendMessage(conversationId,
-                ContentMarkers::encodeVoiceNote(mime, durationMs,
-                                                QList<int>(waveform.cbegin(), waveform.cend()),
-                                                bytes));
+void PeersUiBackend::uploadPendingVoice()
+{
+    if (m_pendingVoiceBytes.isEmpty() || m_pendingVoiceConversationId.isEmpty())
+        return;
+    setVoiceRetryAvailable(false);
+    report(QStringLiteral("Uploading voice message…"));
+    storage()->uploadEncrypted(m_pendingVoiceBytes, [this](
+                                          bool uploaded, StorageClient::Uploaded u, QString err) {
+        if (!uploaded) {
+            setVoiceRetryAvailable(true);
+            report(err.isEmpty() ? QStringLiteral("Voice upload failed — retry or discard.")
+                                 : err + QStringLiteral(" — retry or discard."));
+            return;
+        }
+        const QString conversationId = m_pendingVoiceConversationId;
+        const QString mime = m_pendingVoiceMime;
+        const int durationMs = m_pendingVoiceDurationMs;
+        const QString marker = ContentMarkers::encodeHostedMedia(
+            u.cid, u.keyB64, mime, durationMs, 1, u.cap);
+        if (sendMessageInternal(conversationId, marker, false)) {
+            discardVoice();
+        } else {
+            setVoiceRetryAvailable(true);
+            report(QStringLiteral("Voice send failed — retry or discard."));
+        }
+    });
+}
+
+void PeersUiBackend::retryVoice()
+{
+    if (!voiceRetryAvailable() || m_pendingVoiceBytes.isEmpty())
+        return;
+    uploadPendingVoice();
+}
+
+void PeersUiBackend::discardVoice()
+{
+    m_pendingVoiceBytes.clear();
+    m_pendingVoiceMime.clear();
+    m_pendingVoiceConversationId.clear();
+    m_pendingVoiceDurationMs = 0;
+    setVoiceRetryAvailable(false);
 }
 void PeersUiBackend::refreshContacts()
 {

@@ -20,9 +20,12 @@ Rectangle {
     // composer only asks, it never owns the capture state.
     property bool recording: false
     property int recordingMs: 0
+    property bool voiceRetryAvailable: false
     signal startRecord()
     signal cancelRecord()
     signal sendRecord()
+    signal retryVoice()
+    signal discardVoice()
 
     function mmss(ms) {
         const total = Math.round(ms / 1000);
@@ -109,7 +112,7 @@ Rectangle {
         // cap goes to Logos Storage automatically (see sendMedia).
         Rectangle {
             Layout.alignment: Qt.AlignVCenter
-            visible: !root.recording
+            visible: !root.recording && !root.voiceRetryAvailable
             Layout.preferredWidth: 36
             Layout.preferredHeight: 36
             implicitWidth: 36
@@ -124,7 +127,7 @@ Rectangle {
         // Share a location.
         Rectangle {
             Layout.alignment: Qt.AlignVCenter
-            visible: !root.recording
+            visible: !root.recording && !root.voiceRetryAvailable
             Layout.preferredWidth: 36
             Layout.preferredHeight: 36
             implicitWidth: 36
@@ -184,11 +187,40 @@ Rectangle {
             }
         }
 
+        RowLayout {
+            Layout.fillWidth: true
+            visible: root.voiceRetryAvailable && !root.recording
+            spacing: Theme.space2
+
+            Text {
+                Layout.fillWidth: true
+                text: "Voice upload failed"
+                color: Theme.textDim
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.bodySize
+            }
+            Text {
+                text: "Discard"
+                color: Theme.textDim
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.bodySize
+                TapHandler { onTapped: root.discardVoice() }
+            }
+            Text {
+                text: "Retry"
+                color: Theme.accent
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.bodySize
+                font.weight: Font.DemiBold
+                TapHandler { onTapped: root.retryVoice() }
+            }
+        }
+
         TextArea {
             id: input
-            visible: !root.recording
-            Layout.fillWidth: !root.recording
-            Layout.preferredWidth: root.recording ? 0 : -1
+            visible: !root.recording && !root.voiceRetryAvailable
+            Layout.fillWidth: !root.recording && !root.voiceRetryAvailable
+            Layout.preferredWidth: (root.recording || root.voiceRetryAvailable) ? 0 : -1
             Layout.maximumHeight: 120
             placeholderText: root.placeholder
             // Peers renders placeholders in textFaint, always.
@@ -226,6 +258,7 @@ Rectangle {
         }
 
         Rectangle {
+            visible: !root.voiceRetryAvailable
             Layout.alignment: Qt.AlignVCenter
             Layout.preferredWidth: 44
             Layout.preferredHeight: 44

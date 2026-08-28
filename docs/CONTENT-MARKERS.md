@@ -164,17 +164,20 @@ have no production call site — mime and dimensions are validated **only** in J
 
 ### Blob wire format (what actually lives at the CID)
 
-Upload (`StorageModule.uploadEncrypted`, `StorageModule.kt:96-155`):
+Upload (`StorageModule.uploadEncrypted`, `StorageModule.kt:247-318`):
 
-1. `plain = MediaPadding.pad(fileBytes)` — always (`StorageModule.kt:102`).
-2. fresh random 32-byte AES key + 12-byte IV (`IV_LEN = 12`, `TAG_BITS = 128`, `StorageModule.kt:39-40,104-105`).
-3. `ct = AES/GCM/NoPadding(plain)`; `blob = iv || ct(+tag)` (`StorageModule.kt:106-109`).
-4. `POST <STORAGE_BASE>/data`, `Authorization: Bearer <STORAGE_TOKEN>`,
+1. `plain = MediaPadding.pad(fileBytes)` — always (`StorageModule.kt:251-253`).
+2. fresh random 32-byte AES key + 12-byte IV (`IV_LEN = 12`, `TAG_BITS = 128`,
+   `StorageModule.kt:254-260`).
+3. request a bounded challenge, solve `SHA-256(challenge:bytes:nonce)` proof-of-work, and exchange
+   it for a short-lived one-use grant whose `max_bytes` exactly equals `blob.size`
+   (`StorageModule.kt:78-158`, `StorageUploadGrant.kt`).
+4. `POST <STORAGE_BASE>/data` with only `X-Upload-Grant: <grant>` and
    `Content-Type: application/octet-stream`, fixed-length streaming in 64 KiB chunks
-   (`StorageModule.kt:111-132`).
-5. Response body is `"<cid>:<cap>"` (split on the **first** `:`; no `:` ⇒ cap = `""`)
-   (`StorageModule.kt:138-144`).
-6. Resolves `{cid, key: base64(NO_WRAP), cap}` (`StorageModule.kt:146-150`).
+   (`StorageModule.kt:262-295`). No reusable bearer is sent.
+5. Response body must be exactly `"<cid>:<cap>"`; CID and fresh lowercase 32-hex read capability
+   are validated before use (`StorageModule.kt:299-307`).
+6. Resolves `{cid, key: base64(NO_WRAP), cap}` (`StorageModule.kt:310-314`).
 
 Padmé size padding (`MediaPadding.kt`):
 
@@ -195,19 +198,19 @@ padmeBucket(l):                                                            // Me
 `pad()` buckets `HEADER + realLen`; `strip()` throws on `padded.size < HEADER` and rejects
 `realLen < 0 || HEADER + realLen > padded.size` (`MediaPadding.kt:43-54`).
 
-Download (`StorageModule.downloadDecrypt`, `StorageModule.kt:158-236`):
+Download (`StorageModule.downloadDecrypt`, `StorageModule.kt:321-404`):
 - cache file = `cacheDir/media/<SHA-256(cid) as lowercase hex>` — never the raw CID
   (`StorageRef.cacheName`, `StorageRef.kt:60-63`; used at `StorageModule.kt:169-170`); an existing
   non-empty cache file short-circuits the whole fetch (`StorageModule.kt:171-174`);
 - URL = `buildDataUrl(base, cid, cap)` → `<base>/data/<urlenc cid>` plus `?cap=<urlenc cap>` when
-  cap is non-empty (`StorageRef.kt:71-79`); the GET also carries
-  `Authorization: Bearer <STORAGE_TOKEN>` (`StorageModule.kt:183`);
+  cap is non-empty (`StorageRef.kt:71-79`). Capability-bearing reads omit the legacy bearer;
+  `Authorization` is used only for capless migration markers (`StorageModule.kt:341-351`);
 - `instanceFollowRedirects = false`; a 3xx throws; `text/html` or `application/json` content-type
   throws; an oversized `Content-Length` is rejected up front and the read is aborted past
-  `MAX_CIPHERTEXT_BYTES = 100 MiB` (`StorageRef.kt:28`, `StorageModule.kt:180-215`); a blob
-  `<= IV_LEN` throws (`StorageModule.kt:218`);
+  `MAX_CIPHERTEXT_BYTES = 100 MiB` (`StorageRef.kt:28`, `StorageModule.kt:352-383`); a blob
+  `<= IV_LEN` throws (`StorageModule.kt:387`);
 - decrypt `iv = blob[0..12)`, `ct = blob[12..]`, then `if (padded) MediaPadding.strip(...)`
-  (`StorageModule.kt:218-228`).
+  (`StorageModule.kt:389-399`).
 
 Both upload and download open their connection through `openConn` (`StorageModule.kt:56-71`), which
 routes via a local **Tor SOCKS5** proxy when Private mode is on and throws rather than silently
