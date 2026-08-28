@@ -24,13 +24,13 @@ cd "$(dirname "$0")/.."
 
 SC=""
 SC2=""
-CORE_NEW=""
-UI_NEW=""
+CORE_STAGE=""
+UI_STAGE=""
 cleanup() {
   [ -z "$SC" ] || rm -rf "$SC"
   [ -z "$SC2" ] || rm -rf "$SC2"
-  [ -z "$CORE_NEW" ] || rm -rf "$CORE_NEW"
-  [ -z "$UI_NEW" ] || rm -rf "$UI_NEW"
+  [ -z "$CORE_STAGE" ] || rm -rf "$CORE_STAGE"
+  [ -z "$UI_STAGE" ] || rm -rf "$UI_STAGE"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -63,17 +63,11 @@ UI_LGX=$(find /extra/tmp/peers-ui-lgx/ -name '*.lgx' | head -1)
 
 SC=$(mktemp -d /extra/tmp/peers-lgx-XXXX)
 python3 -B scripts/safe_extract_lgx.py "$UI_LGX" "$SC"
-UI_DEST="$GUI/plugins/peers_ui"
-UI_NEW="$GUI/plugins/.peers_ui.new.$$"
-rm -rf "$UI_NEW"
-mkdir -p "$UI_NEW"
-cp -rf "$SC/variants/linux-amd64/." "$UI_NEW/"
-cp -f "$SC/manifest.json" "$UI_NEW/manifest.json"
-printf 'linux-amd64' > "$UI_NEW/variant"
-chmod -R u+w "$UI_NEW"
-python3 -B scripts/install_ui_package.py "$UI_NEW" "$UI_DEST"
-UI_NEW=""
-echo "  plugins/peers_ui  ok"
+UI_STAGE=$(mktemp -d /extra/tmp/peers-ui-stage-XXXX)
+cp -rf "$SC/variants/linux-amd64/." "$UI_STAGE/"
+cp -f "$SC/manifest.json" "$UI_STAGE/manifest.json"
+printf 'linux-amd64' > "$UI_STAGE/variant"
+chmod -R u+w "$UI_STAGE"
 
 # ── the core module it depends on ───────────────────────────────────────────
 #
@@ -93,8 +87,7 @@ echo "building peers_core (pinned $CORE_REV)…"
 TMPDIR=/extra/tmp nix build \
   "github:xAlisher/peers-core/${CORE_REV}#packages.x86_64-linux.lgx-portable" \
   --accept-flake-config -o /extra/tmp/peers-core-lgx || {
-    echo "FAILED to build peers_core. The UI will install but Peers will do" >&2
-    echo "NOTHING when clicked — it cannot resolve its dependency." >&2
+    echo "FAILED to build peers_core. The existing UI/core release remains active." >&2
     exit 1
   }
 CORE_LGX=$(find /extra/tmp/peers-core-lgx/ -name '*.lgx' | head -1)
@@ -108,24 +101,20 @@ python3 -B scripts/safe_extract_lgx.py "$CORE_LGX" "$SC2"
   echo "invalid peers_core package: variant or manifest missing" >&2
   exit 1
 }
-CORE_DEST="$GUI/modules/peers_core"
-CORE_NEW="$GUI/modules/.peers_core.new.$$"
-rm -rf "$CORE_NEW"
-mkdir -p "$CORE_NEW"
-cp -rf "$SC2/variants/linux-amd64/." "$CORE_NEW/"
-cp -f  "$SC2/manifest.json" "$CORE_NEW/manifest.json"
-printf 'linux-amd64' > "$CORE_NEW/variant"
-chmod -R u+w "$CORE_NEW"
-[ -s "$CORE_NEW/manifest.json" ] && [ -s "$CORE_NEW/variant" ] \
-  && [ -n "$(find "$CORE_NEW" -type f ! -name manifest.json ! -name variant -print -quit)" ] || {
+CORE_STAGE=$(mktemp -d /extra/tmp/peers-core-stage-XXXX)
+cp -rf "$SC2/variants/linux-amd64/." "$CORE_STAGE/"
+cp -f "$SC2/manifest.json" "$CORE_STAGE/manifest.json"
+printf 'linux-amd64' > "$CORE_STAGE/variant"
+chmod -R u+w "$CORE_STAGE"
+[ -s "$CORE_STAGE/manifest.json" ] && [ -s "$CORE_STAGE/variant" ] \
+  && [ -n "$(find "$CORE_STAGE" -type f ! -name manifest.json ! -name variant -print -quit)" ] || {
   echo "invalid staged peers_core tree" >&2
   exit 1
 }
-python3 -B scripts/install_core_package.py "$CORE_NEW" "$CORE_DEST"
-CORE_NEW=""
-echo "  modules/peers_core  ok"
-
 rm -rf "$ISO/cache/Logos/LogosBasecamp/qmlcache/"* 2>/dev/null
+python3 -B scripts/install_release_bundle.py "$UI_STAGE" "$CORE_STAGE" "$GUI"
+echo "  plugins/peers_ui  ok"
+echo "  modules/peers_core  ok"
 
 # ── assert BOTH halves, and every dependency the manifest names ─────────────
 fail=0

@@ -12,6 +12,7 @@ const validatorPath = resolve(root, 'scripts/validate_core_package.py');
 const coreInstallerPath = resolve(root, 'scripts/install_core_package.py');
 const uiValidatorPath = resolve(root, 'scripts/validate_ui_package.py');
 const uiInstallerPath = resolve(root, 'scripts/install_ui_package.py');
+const releaseInstallerPath = resolve(root, 'scripts/install_release_bundle.py');
 const targetValidatorPath = resolve(root, 'scripts/validate_iso_target.py');
 const source = fs.readFileSync(installerPath, 'utf8');
 let failed = false;
@@ -27,14 +28,13 @@ function requirePattern(pattern, message) {
 requirePattern(/set -euo pipefail/, 'installer is not fail-fast');
 requirePattern(/flake\.lock[\s\S]*?peers_core[\s\S]*?rev/, 'installer does not resolve the pinned peers_core revision');
 requirePattern(/github:xAlisher\/peers-core\/\$\{?CORE_REV\}?/, 'installer does not build the pinned peers_core revision');
-requirePattern(/install_core_package\.py"?\s+"\$CORE_NEW"\s+"\$CORE_DEST"/, 'installer does not validate then atomically replace peers_core');
-requirePattern(/install_ui_package\.py"?\s+"\$UI_NEW"\s+"\$UI_DEST"/, 'installer does not validate then atomically replace peers_ui');
+requirePattern(/install_release_bundle\.py"?\s+"\$UI_STAGE"\s+"\$CORE_STAGE"\s+"\$GUI"/, 'installer does not activate UI and core as one atomic release');
 requirePattern(/safe_extract_lgx\.py"?\s+"\$UI_LGX"\s+"\$SC"/, 'installer does not safely extract peers_ui');
 requirePattern(/safe_extract_lgx\.py"?\s+"\$CORE_LGX"\s+"\$SC2"/, 'installer does not safely extract peers_core');
 if (/tar\s+x/.test(source)) fail('installer still performs permissive archive extraction');
 requirePattern(/ISO=\$\(python3 scripts\/validate_iso_target\.py "\$ISO"\)[\s\S]{0,120}?GUI="\$ISO\/data\/Logos\/LogosBasecamp"/, 'installer does not canonicalize and validate the isolated target');
 requirePattern(/artifact_identity\.py[\s\S]{0,500}?--ui-lgx[\s\S]{0,500}?--core-lgx[\s\S]{0,500}?--appimage/, 'final install cannot generate an artifact identity report');
-requirePattern(/\[ -s "\$CORE_NEW\/manifest\.json" \]/, 'installer does not validate its staged manifest');
+requirePattern(/\[ -s "\$CORE_STAGE\/manifest\.json" \]/, 'installer does not validate its staged manifest');
 if (/mv\s+"\$CORE_DEST"\s+"\$CORE_OLD"/.test(source))
   fail('installer still creates a window where peers_core is absent');
 if (/already present[^\n]*leaving it/.test(source))
@@ -89,7 +89,8 @@ if (!fs.existsSync(replacerPath)) {
 }
 
 if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)
-    || !fs.existsSync(uiValidatorPath) || !fs.existsSync(uiInstallerPath)) {
+    || !fs.existsSync(uiValidatorPath) || !fs.existsSync(uiInstallerPath)
+    || !fs.existsSync(releaseInstallerPath)) {
   fail('package validator or validate-then-replace helper is missing');
 } else {
   const work = fs.mkdtempSync('/extra/tmp/peers-package-test-');
@@ -263,6 +264,39 @@ if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)
     if (uiInstalled.status !== 0) fail(`valid UI package install failed: ${uiInstalled.stderr.trim()}`);
     if (!fs.existsSync(resolve(uiDest, 'peers_ui_plugin.so')) || fs.existsSync(resolve(uiDest, 'version')))
       fail('valid UI package did not atomically replace the working UI');
+
+    const releaseGui = resolve(work, 'LogosBasecamp');
+    function resetOldRelease() {
+      fs.rmSync(releaseGui, {recursive: true, force: true});
+      fs.mkdirSync(resolve(releaseGui, 'plugins/peers_ui'), {recursive: true});
+      fs.mkdirSync(resolve(releaseGui, 'modules/peers_core'), {recursive: true});
+      fs.writeFileSync(resolve(releaseGui, 'plugins/peers_ui/version'), 'old-ui');
+      fs.writeFileSync(resolve(releaseGui, 'modules/peers_core/version'), 'old-core');
+    }
+    resetOldRelease();
+    const preRelease = spawnSync('python3', [releaseInstallerPath, uiValid, valid, releaseGui], {
+      encoding: 'utf8', env: {...process.env, PEERS_ATOMIC_REPLACE_TEST_FAIL: 'before-exchange'},
+    });
+    if (preRelease.status === 0) fail('pre-exchange release failure unexpectedly succeeded');
+    if (fs.readFileSync(resolve(releaseGui, 'plugins/peers_ui/version'), 'utf8') !== 'old-ui'
+        || fs.readFileSync(resolve(releaseGui, 'modules/peers_core/version'), 'utf8') !== 'old-core')
+      fail('pre-exchange failure produced a mixed release');
+
+    const installedRelease = spawnSync('python3', [releaseInstallerPath, uiValid, valid, releaseGui],
+      {encoding: 'utf8'});
+    if (installedRelease.status !== 0) fail(`coherent release install failed: ${installedRelease.stderr.trim()}`);
+    if (!fs.existsSync(resolve(releaseGui, 'plugins/peers_ui/peers_ui_plugin.so'))
+        || !fs.existsSync(resolve(releaseGui, 'modules/peers_core/peers_core_plugin.so')))
+      fail('coherent release did not activate both components');
+
+    resetOldRelease();
+    const postRelease = spawnSync('python3', [releaseInstallerPath, uiValid, valid, releaseGui], {
+      encoding: 'utf8', env: {...process.env, PEERS_ATOMIC_REPLACE_TEST_FAIL: 'after-exchange'},
+    });
+    if (postRelease.status === 0) fail('post-exchange interruption unexpectedly succeeded');
+    if (!fs.existsSync(resolve(releaseGui, 'plugins/peers_ui/peers_ui_plugin.so'))
+        || !fs.existsSync(resolve(releaseGui, 'modules/peers_core/peers_core_plugin.so')))
+      fail('post-exchange interruption left a mixed release');
   } finally {
     fs.rmSync(work, {recursive: true, force: true});
   }
@@ -324,4 +358,4 @@ if (!fs.existsSync(targetValidatorPath)) {
 }
 
 if (failed) process.exit(1);
-console.log('ok: isolated installer atomically updates validated peers_ui and pinned peers_core packages');
+console.log('ok: isolated installer atomically activates one validated UI/core release');

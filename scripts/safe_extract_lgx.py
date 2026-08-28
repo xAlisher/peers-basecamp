@@ -42,13 +42,13 @@ def extract(archive: Path, destination: Path) -> None:
             if path in seen:
                 raise ValueError(f"duplicate package path: {path}")
             seen.add(path)
-            if path != PurePosixPath("manifest.json") \
-                    and path != VARIANT_PREFIX \
-                    and path not in VARIANT_PREFIX.parents \
-                    and VARIANT_PREFIX not in path.parents:
-                raise ValueError(f"unexpected package path: {path}")
             if not member.isdir() and not member.isfile():
                 raise ValueError(f"package contains link or special node: {path}")
+            if member.isdir():
+                if path not in {PurePosixPath("variants"), VARIANT_PREFIX}:
+                    raise ValueError(f"unexpected package directory: {path}")
+            elif path != PurePosixPath("manifest.json") and VARIANT_PREFIX not in path.parents:
+                raise ValueError(f"unexpected package file: {path}")
             if member.isfile():
                 if member.size < 0 or member.size > MAX_FILE_BYTES:
                     raise ValueError(f"oversized package member: {path}")

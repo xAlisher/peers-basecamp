@@ -81,4 +81,31 @@ with tempfile.TemporaryDirectory(prefix="peers-lgx-test-", dir="/extra/tmp") as 
         add_bytes(package, "manifest.json", b"replacement")
     run_case(root, "duplicate", duplicate, False)
 
+    def dot_root(package: tarfile.TarFile) -> None:
+        valid(package)
+        directory = tarfile.TarInfo(".")
+        directory.type = tarfile.DIRTYPE
+        package.addfile(directory)
+    run_case(root, "dot-root", dot_root, False)
+
+    def parent_as_file(package: tarfile.TarFile) -> None:
+        add_bytes(package, "manifest.json", b"{}")
+        add_bytes(package, "variants", b"not a directory")
+    run_case(root, "parent-as-file", parent_as_file, False)
+
+    def prefix_as_file(package: tarfile.TarFile) -> None:
+        add_bytes(package, "manifest.json", b"{}")
+        add_bytes(package, "variants/linux-amd64", b"not a directory")
+    run_case(root, "prefix-as-file", prefix_as_file, False)
+
+    def sibling_variant(package: tarfile.TarFile) -> None:
+        valid(package)
+        add_bytes(package, "variants/linux-arm64/plugin.so", b"elf")
+    run_case(root, "sibling-variant", sibling_variant, False)
+
+    def unexpected_root(package: tarfile.TarFile) -> None:
+        valid(package)
+        add_bytes(package, "unexpected/file", b"bad")
+    run_case(root, "unexpected-root", unexpected_root, False)
+
 print("ok: LGX extraction rejects hostile members before writing")
