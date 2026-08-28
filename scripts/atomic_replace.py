@@ -18,10 +18,7 @@ RENAME_EXCHANGE = 2
 def test_pause(point: str) -> None:
     if os.environ.get("PEERS_ATOMIC_REPLACE_TEST_PAUSE") != point:
         return
-    marker = os.environ.get("PEERS_ATOMIC_REPLACE_TEST_MARKER")
-    if not marker:
-        raise RuntimeError("test pause requires a marker path")
-    Path(marker).write_text(point)
+    print(f"PEERS_ATOMIC_REPLACE_TEST_PAUSE:{point}", flush=True)
     while True:
         time.sleep(1)
 

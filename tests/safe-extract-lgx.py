@@ -128,6 +128,25 @@ with tempfile.TemporaryDirectory(prefix="peers-lgx-test-", dir="/extra/tmp") as 
         package.addfile(member)
     run_case(root, "character-device", character_device, False)
 
+    def block_device(package: tarfile.TarFile) -> None:
+        valid(package)
+        member = tarfile.TarInfo("variants/linux-amd64/block-device")
+        member.type = tarfile.BLKTYPE
+        package.addfile(member)
+    run_case(root, "block-device", block_device, False)
+
+    def socket_node(package: tarfile.TarFile) -> None:
+        valid(package)
+        member = tarfile.TarInfo("variants/linux-amd64/socket")
+        member.type = b"s"
+        package.addfile(member)
+    run_case(root, "socket-node", socket_node, False)
+
+    def absolute_path(package: tarfile.TarFile) -> None:
+        valid(package)
+        add_bytes(package, "/variants/linux-amd64/escape", b"absolute")
+    run_case(root, "absolute-path", absolute_path, False)
+
     def path_conflict(package: tarfile.TarFile) -> None:
         add_bytes(package, "manifest.json", b"{}")
         add_bytes(package, "variants/linux-amd64/qml", b"file ancestor")

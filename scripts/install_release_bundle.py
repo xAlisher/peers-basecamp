@@ -37,6 +37,11 @@ def install(ui_staged: Path, core_staged: Path, iso_root: Path) -> None:
     exchange_attempted = False
     try:
         shutil.copytree(iso_root, stage, symlinks=True)
+        stage.chmod(0o700)
+        # Validate copied package ancestors before any path-based removal. This
+        # rejects source races that copied plugins/modules as symlinks and the
+        # owner-only candidate prevents cross-user retargeting after validation.
+        validate_iso(stage)
         gui = stage / "data/Logos/LogosBasecamp"
         ui_destination = gui / "plugins/peers_ui"
         core_destination = gui / "modules/peers_core"

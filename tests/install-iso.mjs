@@ -376,6 +376,52 @@ if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)
         fail(`cache ancestor non-directory was not safely replaced: ${relative}`);
     }
 
+    for (const packageParent of ['plugins', 'modules']) {
+      resetOldRelease();
+      const external = resolve(work, `external-${packageParent}`);
+      fs.mkdirSync(external);
+      fs.writeFileSync(resolve(external, 'must-survive'), 'unrelated');
+      fs.rmSync(resolve(releaseGui, packageParent), {recursive: true});
+      fs.symlinkSync(external, resolve(releaseGui, packageParent));
+      const linkedParent = spawnSync('python3',
+        [releaseInstallerPath, uiValid, valid, releaseIso], {encoding: 'utf8'});
+      if (linkedParent.status === 0 || !fs.existsSync(resolve(external, 'must-survive'))
+          || fs.readdirSync(external).length !== 1)
+        fail(`symlinked ${packageParent} parent escaped the isolated release root`);
+    }
+
+    resetOldRelease();
+    const raceExternal = resolve(work, 'external-post-clone-plugins');
+    fs.mkdirSync(raceExternal);
+    fs.writeFileSync(resolve(raceExternal, 'must-survive'), 'unrelated');
+    const raceProbe = `
+import pathlib, shutil, sys
+sys.path.insert(0, ${JSON.stringify(resolve(root, 'scripts'))})
+import install_release_bundle as release
+ui, core, iso, external = map(pathlib.Path, sys.argv[1:])
+original = release.shutil.copytree
+def copytree(source, destination, *args, **kwargs):
+    result = original(source, destination, *args, **kwargs)
+    if pathlib.Path(source) == iso:
+        parent = pathlib.Path(destination) / 'data/Logos/LogosBasecamp/plugins'
+        shutil.rmtree(parent)
+        parent.symlink_to(external, target_is_directory=True)
+    return result
+release.shutil.copytree = copytree
+try:
+    release.install(ui, core, iso)
+except ValueError:
+    pass
+else:
+    raise SystemExit('post-clone package-parent retarget was accepted')
+if not (external / 'must-survive').is_file() or len(list(external.iterdir())) != 1:
+    raise SystemExit('post-clone package-parent retarget touched external data')
+`;
+    const racedParent = spawnSync('python3', ['-c', raceProbe, uiValid, valid, releaseIso, raceExternal],
+      {encoding: 'utf8'});
+    if (racedParent.status !== 0)
+      fail(`candidate package-parent validation is ineffective: ${racedParent.stderr.trim()}`);
+
     resetOldRelease();
     const postRelease = spawnSync('python3', [releaseInstallerPath, uiValid, valid, releaseIso], {
       encoding: 'utf8', env: {...process.env, PEERS_ATOMIC_REPLACE_TEST_FAIL: 'after-exchange'},
@@ -388,15 +434,17 @@ if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)
 
     async function signalInterruption(point, signal) {
       resetOldRelease();
-      const marker = resolve(work, `signal-${point}-${signal}`);
+      const marker = `PEERS_ATOMIC_REPLACE_TEST_PAUSE:${point}`;
+      let output = '';
       const child = spawn('python3', [releaseInstallerPath, uiValid, valid, releaseIso], {
-        stdio: 'ignore',
-        env: {...process.env, PEERS_ATOMIC_REPLACE_TEST_PAUSE: point,
-          PEERS_ATOMIC_REPLACE_TEST_MARKER: marker},
+        stdio: ['ignore', 'pipe', 'ignore'],
+        env: {...process.env, PEERS_ATOMIC_REPLACE_TEST_PAUSE: point},
       });
-      for (let attempt = 0; attempt < 500 && !fs.existsSync(marker); ++attempt)
+      child.stdout.setEncoding('utf8');
+      child.stdout.on('data', chunk => { output += chunk; });
+      for (let attempt = 0; attempt < 500 && !output.includes(marker); ++attempt)
         await new Promise(resolveWait => setTimeout(resolveWait, 10));
-      if (!fs.existsSync(marker)) {
+      if (!output.includes(marker)) {
         child.kill('SIGKILL');
         fail(`${signal} process did not reach ${point}`);
         return;
@@ -411,6 +459,11 @@ if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)
       if (!expectNew && (fs.readFileSync(resolve(releaseGui, 'plugins/peers_ui/version'), 'utf8') !== 'old-ui'
           || fs.readFileSync(resolve(releaseGui, 'modules/peers_core/version'), 'utf8') !== 'old-core'))
         fail(`${signal} at ${point} did not preserve both old components`);
+      if (expectNew && (!fs.lstatSync(releaseCache).isDirectory()
+          || fs.readdirSync(releaseCache).length !== 0))
+        fail(`${signal} at ${point} did not publish the fresh cache with both packages`);
+      if (!expectNew && !fs.existsSync(resolve(releaseCache, 'stale')))
+        fail(`${signal} at ${point} did not preserve the old cache with both packages`);
       assertPersistence(`${signal} at ${point}`);
     }
     for (const signal of ['SIGINT', 'SIGTERM', 'SIGKILL']) {
