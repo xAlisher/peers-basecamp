@@ -16,6 +16,7 @@ logos_module(
         src/PeersUiBackend.cpp
         src/ContentMarkers.h
         src/ContentMarkers.cpp
+        src/HostedBoundary.h
         src/BackupReader.h
         src/BackupReader.cpp
         src/MediaPadding.h
@@ -23,6 +24,8 @@ logos_module(
         src/StorageClient.h
         src/StorageClient.cpp
         src/StorageBounds.h
+        src/MediaSave.h
+        src/MediaSave.cpp
         src/VoiceRecorder.h
         src/VoiceRecorder.cpp
         src/MediaTools.h

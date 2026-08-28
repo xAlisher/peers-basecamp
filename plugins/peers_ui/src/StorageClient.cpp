@@ -1,6 +1,7 @@
 #include "StorageClient.h"
 
 #include "MediaTools.h"
+#include "MediaSave.h"
 #include "StorageBounds.h"
 
 #include <QCryptographicHash>
@@ -716,13 +717,11 @@ void StorageClient::downloadDecrypt(const QString& cid, const QString& keyB64, c
             return;
         }
 
-        QFile out(cachePath);
-        if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        QString cacheError;
+        if (!MediaSave::writeAtomically(cachePath, unpadded, &cacheError)) {
             cb(false, QString(), QStringLiteral("Could not write the media cache."));
             return;
         }
-        out.write(unpadded);
-        out.close();
         cb(true, cachePath, QString());
     });
 }

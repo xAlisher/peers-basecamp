@@ -18,6 +18,8 @@
 
 #include "BackupReader.h"
 #include "GifSafety.h"
+#include "HostedBoundary.h"
+#include "MediaSave.h"
 #include "StorageClient.h"
 #include "MediaTools.h"
 #include "VoiceRecorder.h"
@@ -466,6 +468,9 @@ bool PeersUiBackend::loadMessages(const QString& convoId)
                     fetchHostedMedia(c, cid, keyB64, mcap, mmime);
                 });
             }
+            // The backend retains the raw marker in m_rawByKey and the CID-keyed cache maps.
+            // QML needs only localPath/imageUri/mediaError and must never receive the CID.
+            HostedBoundary::sanitizeViewRow(&row);
         }
 
         // An inline PHOTO arrives as base64 too, and cannot be handed to QML as a
@@ -668,7 +673,8 @@ void PeersUiBackend::createConversation(QString peerAddress)
 
 void PeersUiBackend::sendMessage(QString conversationId, QString content)
 {
-    sendMessageInternal(conversationId, content, true);
+    sendMessageInternal(conversationId, content,
+                        HostedBoundary::restoreToComposer(content));
 }
 
 bool PeersUiBackend::sendMessageInternal(const QString& conversationId, const QString& content,
@@ -1499,42 +1505,19 @@ void PeersUiBackend::saveMedia(QString messageId, QString destPath)
         return;
     }
 
-    const QJsonObject o = ContentMarkers::decodeToJson(raw);
-    const QString kind = o.value(QStringLiteral("kind")).toString();
-    const bool hosted = o.contains(QStringLiteral("cid"));
-
+    const QJsonObject decoded = ContentMarkers::decodeToJson(raw);
+    const QString cached = m_mediaPaths.value(
+        decoded.value(QStringLiteral("cid")).toString());
     QByteArray bytes;
-    if (hosted && (kind == QLatin1String("media") || kind == QLatin1String("voice"))) {
-        // Hosted media and hosted voice are already decrypted into the cache by
-        // the fetch path. Copy the bytes verbatim; never re-encode voice data.
-        const QString cached = m_mediaPaths.value(o.value(QStringLiteral("cid")).toString());
-        QFile f(cached);
-        if (cached.isEmpty() || !f.open(QIODevice::ReadOnly)) {
-            report(QStringLiteral("That media has not finished downloading yet."));
-            return;
-        }
-        bytes = f.readAll();
-    } else if (kind == QLatin1String("photo") || kind == QLatin1String("voice")) {
-        // Inline: the payload sits after the unit separator. Go through the
-        // shared helper — it accepts BOTH separator forms, so a photo or voice
-        // note from the phone (U+241F) saves as readily as one of ours.
-        bytes = ContentMarkers::inlinePayloadBytes(raw);
-        if (bytes.isEmpty()) {
-            report(QStringLiteral("That message carries no data."));
-            return;
-        }
-    } else {
-        report(QStringLiteral("There is nothing to save on that message."));
+    QString error;
+    if (!MediaSave::payloadBytes(raw, cached, &bytes, &error)) {
+        report(error);
         return;
     }
-
-    QFile out(destPath);
-    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    if (!MediaSave::writeAtomically(destPath, bytes, &error)) {
         report(QStringLiteral("Could not write %1").arg(QFileInfo(destPath).fileName()));
         return;
     }
-    out.write(bytes);
-    out.close();
     Q_EMIT toast(QStringLiteral("Saved"));
 }
 void PeersUiBackend::startRecording()
