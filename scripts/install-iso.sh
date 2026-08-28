@@ -62,7 +62,7 @@ UI_LGX=$(find /extra/tmp/peers-ui-lgx/ -name '*.lgx' | head -1)
 [ -n "$UI_LGX" ] || { echo "no .lgx produced" >&2; exit 1; }
 
 SC=$(mktemp -d /extra/tmp/peers-lgx-XXXX)
-tar xzf "$UI_LGX" -C "$SC"
+python3 -B scripts/safe_extract_lgx.py "$UI_LGX" "$SC"
 UI_DEST="$GUI/plugins/peers_ui"
 UI_NEW="$GUI/plugins/.peers_ui.new.$$"
 rm -rf "$UI_NEW"
@@ -103,7 +103,7 @@ CORE_LGX=$(find /extra/tmp/peers-core-lgx/ -name '*.lgx' | head -1)
   exit 1
 }
 SC2=$(mktemp -d /extra/tmp/peers-core-XXXX)
-tar xzf "$CORE_LGX" -C "$SC2"
+python3 -B scripts/safe_extract_lgx.py "$CORE_LGX" "$SC2"
 [ -d "$SC2/variants/linux-amd64" ] && [ -s "$SC2/manifest.json" ] || {
   echo "invalid peers_core package: variant or manifest missing" >&2
   exit 1

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 
 process.env.PYTHONDONTWRITEBYTECODE = '1';
 
@@ -29,6 +29,9 @@ requirePattern(/flake\.lock[\s\S]*?peers_core[\s\S]*?rev/, 'installer does not r
 requirePattern(/github:xAlisher\/peers-core\/\$\{?CORE_REV\}?/, 'installer does not build the pinned peers_core revision');
 requirePattern(/install_core_package\.py"?\s+"\$CORE_NEW"\s+"\$CORE_DEST"/, 'installer does not validate then atomically replace peers_core');
 requirePattern(/install_ui_package\.py"?\s+"\$UI_NEW"\s+"\$UI_DEST"/, 'installer does not validate then atomically replace peers_ui');
+requirePattern(/safe_extract_lgx\.py"?\s+"\$UI_LGX"\s+"\$SC"/, 'installer does not safely extract peers_ui');
+requirePattern(/safe_extract_lgx\.py"?\s+"\$CORE_LGX"\s+"\$SC2"/, 'installer does not safely extract peers_core');
+if (/tar\s+x/.test(source)) fail('installer still performs permissive archive extraction');
 requirePattern(/ISO=\$\(python3 scripts\/validate_iso_target\.py "\$ISO"\)[\s\S]{0,120}?GUI="\$ISO\/data\/Logos\/LogosBasecamp"/, 'installer does not canonicalize and validate the isolated target');
 requirePattern(/artifact_identity\.py[\s\S]{0,500}?--ui-lgx[\s\S]{0,500}?--core-lgx[\s\S]{0,500}?--appimage/, 'final install cannot generate an artifact identity report');
 requirePattern(/\[ -s "\$CORE_NEW\/manifest\.json" \]/, 'installer does not validate its staged manifest');
@@ -171,9 +174,21 @@ if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)
       resolve(uiValid, 'peers_ui_replica_factory.so')], {input: 'int replica(void) { return 1; }', encoding: 'utf8'});
     if (replica.status !== 0) fail(`could not compile replica factory: ${replica.stderr.trim()}`);
     fs.mkdirSync(resolve(uiValid, 'qml'));
-    fs.writeFileSync(resolve(uiValid, 'qml/PeersView.qml'), 'import QtQuick\nItem {}');
-    fs.writeFileSync(resolve(uiValid, 'Peers_sidebar.png'), 'png');
-    fs.writeFileSync(resolve(uiValid, 'metadata.json'), '{}');
+    const uiAssets = [
+      'Peers_sidebar.png', 'metadata.json', 'qml/AddressCard.qml',
+      'qml/BubbleActionMenu.qml', 'qml/ClipboardProxy.qml', 'qml/Composer.qml',
+      'qml/ContactsPanel.qml', 'qml/ConversationRow.qml', 'qml/EmojiGrid.qml',
+      'qml/EmptyState.qml', 'qml/ForwardPicker.qml', 'qml/GroupInfoPanel.qml',
+      'qml/HexAvatar.qml', 'qml/Identicon.js', 'qml/MediaViewer.qml',
+      'qml/MessageBubble.qml', 'qml/MessageLayout.js', 'qml/PeersIcon.qml',
+      'qml/PeersView.qml', 'qml/PinnedBar.qml', 'qml/SettingsPanel.qml',
+      'qml/Theme.js', 'qml/Toast.qml', 'qml/icons/Peers_sidebar.png', 'qml/qmldir',
+    ];
+    for (const relative of uiAssets) {
+      const path = resolve(uiValid, relative);
+      fs.mkdirSync(dirname(path), {recursive: true});
+      fs.writeFileSync(path, relative.endsWith('.json') ? '{}' : 'runtime asset');
+    }
     fs.writeFileSync(resolve(uiValid, 'manifest.json'), JSON.stringify({
       name: 'peers_ui', type: 'ui_qml', dependencies: ['peers_core', 'delivery_module'],
       main: {'linux-amd64': 'peers_ui_plugin.so'}, view: 'qml/PeersView.qml',
@@ -193,11 +208,55 @@ if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)
       fs.rmSync(staged, {recursive: true, force: true});
     }
     expectUiRejected('missing UI plugin', staged => fs.rmSync(resolve(staged, 'peers_ui_plugin.so')));
+    for (const name of ['peers_ui_replica_factory.so', 'libssl.so.3', 'libcrypto.so.3',
+      'libboost_system.so.1.87.0', ...uiAssets]) {
+      expectUiRejected(`missing UI runtime ${name}`, staged => fs.rmSync(resolve(staged, name)));
+    }
     expectUiRejected('symlinked UI view', staged => {
       fs.rmSync(resolve(staged, 'qml/PeersView.qml'));
       fs.symlinkSync(resolve(uiValid, 'qml/PeersView.qml'), resolve(staged, 'qml/PeersView.qml'));
     });
+    expectUiRejected('symlinked UI replica', staged => {
+      fs.rmSync(resolve(staged, 'peers_ui_replica_factory.so'));
+      fs.symlinkSync(resolve(uiValid, 'peers_ui_replica_factory.so'),
+        resolve(staged, 'peers_ui_replica_factory.so'));
+    });
+    expectUiRejected('FIFO package node', staged => {
+      const fifo = resolve(staged, 'unexpected-fifo');
+      const made = spawnSync('mkfifo', [fifo], {encoding: 'utf8'});
+      if (made.status !== 0) fail(`could not create FIFO fixture: ${made.stderr.trim()}`);
+    });
+    expectUiRejected('unexpected regular file', staged => fs.writeFileSync(resolve(staged, 'extra'), 'x'));
     expectUiRejected('wrong UI manifest', staged => fs.writeFileSync(resolve(staged, 'manifest.json'), '{}'));
+    expectUiRejected('extra UI dependency', staged => {
+      const manifest = JSON.parse(fs.readFileSync(resolve(staged, 'manifest.json')));
+      manifest.dependencies.push('attacker_module');
+      fs.writeFileSync(resolve(staged, 'manifest.json'), JSON.stringify(manifest));
+    });
+    expectUiRejected('extra UI platform entry', staged => {
+      const manifest = JSON.parse(fs.readFileSync(resolve(staged, 'manifest.json')));
+      manifest.main['evil-platform'] = 'evil.so';
+      fs.writeFileSync(resolve(staged, 'manifest.json'), JSON.stringify(manifest));
+    });
+    expectUiRejected('oversized UI manifest', staged =>
+      fs.writeFileSync(resolve(staged, 'manifest.json'), 'x'.repeat(65537)));
+    expectUiRejected('wrong UI variant', staged => fs.writeFileSync(resolve(staged, 'variant'), 'other'));
+    function corruptElf(staged, name, offset, value) {
+      const path = resolve(staged, name);
+      const bytes = fs.readFileSync(path);
+      bytes[offset] = value;
+      fs.writeFileSync(path, bytes);
+    }
+    expectUiRejected('wrong ELF class', staged => corruptElf(staged, 'peers_ui_plugin.so', 4, 1));
+    expectUiRejected('wrong ELF type', staged => corruptElf(staged, 'peers_ui_plugin.so', 16, 2));
+    expectUiRejected('wrong ELF architecture', staged => corruptElf(staged, 'peers_ui_plugin.so', 18, 40));
+    expectUiRejected('invalid replica ELF', staged =>
+      fs.writeFileSync(resolve(staged, 'peers_ui_replica_factory.so'), '\x7fELFjunk'));
+    expectUiRejected('excess package entries', staged => {
+      const extras = resolve(staged, 'excess');
+      fs.mkdirSync(extras);
+      for (let i = 0; i < 4097; ++i) fs.writeFileSync(resolve(extras, `${i}`), 'x');
+    });
     const uiInstallable = resolve(work, '.peers_ui.valid');
     fs.cpSync(uiValid, uiInstallable, {recursive: true});
     const uiInstalled = spawnSync('python3', [uiInstallerPath, uiInstallable, uiDest], {encoding: 'utf8'});
