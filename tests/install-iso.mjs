@@ -228,6 +228,7 @@ if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)
       if (made.status !== 0) fail(`could not create FIFO fixture: ${made.stderr.trim()}`);
     });
     expectUiRejected('unexpected regular file', staged => fs.writeFileSync(resolve(staged, 'extra'), 'x'));
+    expectUiRejected('unexpected empty directory', staged => fs.mkdirSync(resolve(staged, 'empty')));
     expectUiRejected('wrong UI manifest', staged => fs.writeFileSync(resolve(staged, 'manifest.json'), '{}'));
     expectUiRejected('extra UI dependency', staged => {
       const manifest = JSON.parse(fs.readFileSync(resolve(staged, 'manifest.json')));
@@ -253,6 +254,15 @@ if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)
     expectUiRejected('wrong ELF architecture', staged => corruptElf(staged, 'peers_ui_plugin.so', 18, 40));
     expectUiRejected('invalid replica ELF', staged =>
       fs.writeFileSync(resolve(staged, 'peers_ui_replica_factory.so'), '\x7fELFjunk'));
+    for (const name of ['peers_ui_plugin.so', 'peers_ui_replica_factory.so', 'libssl.so.3',
+      'libcrypto.so.3', 'libboost_system.so.1.87.0']) {
+      expectUiRejected(`symlinked native runtime ${name}`, staged => {
+        fs.rmSync(resolve(staged, name));
+        fs.symlinkSync(resolve(uiValid, name), resolve(staged, name));
+      });
+      expectUiRejected(`invalid native runtime ${name}`, staged =>
+        fs.writeFileSync(resolve(staged, name), '\x7fELFjunk'));
+    }
     expectUiRejected('excess package entries', staged => {
       const extras = resolve(staged, 'excess');
       fs.mkdirSync(extras);

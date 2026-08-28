@@ -60,6 +60,12 @@ EXPECTED_FILES = frozenset({
     *REQUIRED_LIBRARIES,
     *RUNTIME_ASSETS,
 })
+EXPECTED_DIRECTORIES = frozenset(
+    parent.as_posix()
+    for relative in EXPECTED_FILES
+    for parent in Path(relative).parents
+    if parent != Path(".")
+)
 
 
 def validate(root: Path) -> None:
@@ -68,6 +74,7 @@ def validate(root: Path) -> None:
 
     entries = 0
     actual_files: set[str] = set()
+    actual_directories: set[str] = set()
     for current, directories, files in os.walk(root, followlinks=False):
         for name in [*directories, *files]:
             entries += 1
@@ -78,6 +85,7 @@ def validate(root: Path) -> None:
             if name in directories:
                 if not stat.S_ISDIR(mode):
                     raise ValueError("staged package contains an invalid directory")
+                actual_directories.add(path.relative_to(root).as_posix())
             elif not stat.S_ISREG(mode):
                 raise ValueError("staged package contains a non-regular file")
             else:
@@ -90,6 +98,10 @@ def validate(root: Path) -> None:
         missing = sorted(expected_files - actual_files)
         unexpected = sorted(actual_files - expected_files)
         raise ValueError(f"unexpected package tree: missing={missing}, unexpected={unexpected}")
+    if actual_directories != EXPECTED_DIRECTORIES:
+        missing = sorted(EXPECTED_DIRECTORIES - actual_directories)
+        unexpected = sorted(actual_directories - EXPECTED_DIRECTORIES)
+        raise ValueError(f"unexpected package directories: missing={missing}, unexpected={unexpected}")
 
     variant = root / "variant"
     manifest_path = root / "manifest.json"
