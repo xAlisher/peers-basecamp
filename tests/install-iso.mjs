@@ -14,6 +14,7 @@ const uiValidatorPath = resolve(root, 'scripts/validate_ui_package.py');
 const uiInstallerPath = resolve(root, 'scripts/install_ui_package.py');
 const releaseInstallerPath = resolve(root, 'scripts/install_release_bundle.py');
 const targetValidatorPath = resolve(root, 'scripts/validate_iso_target.py');
+const cacheClearPath = resolve(root, 'scripts/clear_qml_cache.py');
 const source = fs.readFileSync(installerPath, 'utf8');
 let failed = false;
 
@@ -31,7 +32,9 @@ requirePattern(/github:xAlisher\/peers-core\/\$\{?CORE_REV\}?/, 'installer does 
 requirePattern(/install_release_bundle\.py"?\s+"\$UI_STAGE"\s+"\$CORE_STAGE"\s+"\$GUI"/, 'installer does not activate UI and core as one atomic release');
 requirePattern(/safe_extract_lgx\.py"?\s+"\$UI_LGX"\s+"\$SC"/, 'installer does not safely extract peers_ui');
 requirePattern(/safe_extract_lgx\.py"?\s+"\$CORE_LGX"\s+"\$SC2"/, 'installer does not safely extract peers_core');
+requirePattern(/clear_qml_cache\.py"?\s+"\$ISO"/, 'installer does not clear QML cache through the confined helper');
 if (/tar\s+x/.test(source)) fail('installer still performs permissive archive extraction');
+if (/rm\s+-rf[^\n]*qmlcache/.test(source)) fail('installer still clears QML cache through a symlink-following shell glob');
 requirePattern(/ISO=\$\(python3 scripts\/validate_iso_target\.py "\$ISO"\)[\s\S]{0,120}?GUI="\$ISO\/data\/Logos\/LogosBasecamp"/, 'installer does not canonicalize and validate the isolated target');
 requirePattern(/artifact_identity\.py[\s\S]{0,500}?--ui-lgx[\s\S]{0,500}?--core-lgx[\s\S]{0,500}?--appimage/, 'final install cannot generate an artifact identity report');
 requirePattern(/\[ -s "\$CORE_STAGE\/manifest\.json" \]/, 'installer does not validate its staged manifest');
@@ -312,7 +315,7 @@ if (!fs.existsSync(validatorPath) || !fs.existsSync(coreInstallerPath)
   }
 }
 
-if (!fs.existsSync(targetValidatorPath)) {
+if (!fs.existsSync(targetValidatorPath) || !fs.existsSync(cacheClearPath)) {
   fail('canonical isolated-target validator is missing');
 } else {
   const work = fs.mkdtempSync('/extra/tmp/peers-target-test-');
@@ -330,6 +333,23 @@ if (!fs.existsSync(targetValidatorPath)) {
     const safe = spawnSync('python3', [targetValidatorPath, safeIso], {encoding: 'utf8', env});
     if (safe.status !== 0 || safe.stdout.trim() !== fs.realpathSync(safeIso))
       fail(`safe isolated target was rejected: ${safe.stderr.trim()}`);
+
+    const safeCache = resolve(safeIso, 'cache/Logos/LogosBasecamp/qmlcache');
+    fs.mkdirSync(safeCache, {recursive: true});
+    fs.writeFileSync(resolve(safeCache, 'stale'), 'compiled QML');
+    const cleared = spawnSync('python3', [cacheClearPath, safeIso], {encoding: 'utf8', env});
+    if (cleared.status !== 0 || fs.readdirSync(safeCache).length !== 0)
+      fail(`safe QML cache did not clear atomically: ${cleared.stderr.trim()}`);
+
+    const externalCache = resolve(work, 'external-cache');
+    fs.mkdirSync(externalCache);
+    fs.writeFileSync(resolve(externalCache, 'must-survive'), 'unrelated');
+    fs.rmSync(safeCache, {recursive: true});
+    fs.symlinkSync(externalCache, safeCache);
+    const linkedCache = spawnSync('python3', [cacheClearPath, safeIso], {encoding: 'utf8', env});
+    if (linkedCache.status === 0 || !fs.existsSync(resolve(externalCache, 'must-survive')))
+      fail('symlinked QML cache was accepted or unrelated data was deleted');
+    fs.rmSync(safeCache);
 
     const aliasIso = resolve(work, 'alias-iso');
     fs.mkdirSync(aliasIso);
